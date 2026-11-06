@@ -30,7 +30,10 @@ Tests/build.log
 # --- AI tooling state ---
 
 .freebuff/
-.agents/
+# AI tooling state, except the project's committed agent skills: the pattern
+# must describe .agents/* so Git still descends into .agents/skills/.
+.agents/*
+!.agents/skills/
 skills-lock.json
 .opencode/
 

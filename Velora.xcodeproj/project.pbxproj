@@ -26,6 +26,7 @@
 		AA1000000000000000000033 /* DemoMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000032 /* DemoMode.swift */; };
 		AA1000000000000000000037 /* DemoSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000036 /* DemoSession.swift */; };
 		AA1000000000000000000035 /* DemoControlsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000034 /* DemoControlsView.swift */; };
+		AA1000000000000000000039 /* VeloraMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1000000000000000000038 /* VeloraMotion.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -49,6 +50,7 @@
 		AA1000000000000000000032 /* DemoMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Demo/DemoMode.swift; sourceTree = "<group>"; };
 		AA1000000000000000000036 /* DemoSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/Demo/DemoSession.swift; sourceTree = "<group>"; };
 		AA1000000000000000000034 /* DemoControlsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/DemoControlsView.swift; sourceTree = "<group>"; };
+		AA1000000000000000000038 /* VeloraMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Design/VeloraMotion.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,6 +93,7 @@
 				AA1000000000000000000017 /* TripSession.swift */,
 				AA100000000000000000001D /* GPSStatus.swift */,
 				AA100000000000000000001E /* AccessibilityText.swift */,
+				AA1000000000000000000038 /* VeloraMotion.swift */,
 				AA1000000000000000000030 /* DemoDrive.swift */,
 				AA1000000000000000000032 /* DemoMode.swift */,
 				AA1000000000000000000036 /* DemoSession.swift */,
@@ -187,6 +190,7 @@
 				AA100000000000000000002C /* SpeedometerView.swift in Sources */,
 				AA100000000000000000002D /* GPSStatus.swift in Sources */,
 				AA100000000000000000002E /* AccessibilityText.swift in Sources */,
+				AA1000000000000000000039 /* VeloraMotion.swift in Sources */,
 				AA1000000000000000000031 /* DemoDrive.swift in Sources */,
 				AA1000000000000000000033 /* DemoMode.swift in Sources */,
 				AA1000000000000000000037 /* DemoSession.swift in Sources */,

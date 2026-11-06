@@ -201,24 +201,34 @@ struct DashboardHeader: View {
         }
     }
 
+    private var stateSymbol: String {
+        switch state {
+        case .idle: "circle"
+        case .running: "record.circle"
+        case .paused: "pause.circle"
+        }
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: AppTheme.Spacing.md) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text("VELORA")
                     .font(AppTheme.Typography.eyebrow)
-                    .tracking(3.2)
+                    .tracking(3.6)
                     .foregroundStyle(AppTheme.Colors.textTertiary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    .accessibilityAddTraits(.isHeader)
 
                 HStack(spacing: 7) {
-                    Circle()
-                        .fill(stateColor)
-                        .frame(width: 6, height: 6)
+                    Image(systemName: stateSymbol)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(stateColor)
+                        .contentTransition(.symbolEffect(.replace))
 
                     Text(stateTitle.uppercased())
-                        .font(.caption2.weight(.semibold))
+                        .font(AppTheme.Typography.stateChip)
                         .tracking(1.0)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                         .lineLimit(2)
@@ -230,10 +240,10 @@ struct DashboardHeader: View {
                 .background {
                     Capsule(style: .continuous)
                         .fill(AppTheme.Colors.surface)
-                        .overlay {
-                            Capsule(style: .continuous)
-                                .strokeBorder(AppTheme.Colors.stroke, lineWidth: 1)
-                        }
+                }
+                .overlay {
+                    Capsule(style: .continuous)
+                        .strokeBorder(AppTheme.Colors.hairline, lineWidth: 1)
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Trip status: \(stateTitle)")
@@ -268,8 +278,7 @@ struct DashboardHeader: View {
             Button(action: onOpenSettings) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                    .frame(width: 46, height: 46)
+                    .frame(width: AppTheme.Control.icon, height: AppTheme.Control.icon)
             }
             .buttonStyle(.glass)
             .buttonBorderShape(.circle)
@@ -278,36 +287,109 @@ struct DashboardHeader: View {
     }
 }
 
+/// One status surface for movement and GPS. The icon chip carries the colour,
+/// the text stays primary; a state never relies on hue alone.
+struct StatusCard: View {
+    let symbol: String
+    let title: String
+    let detail: String
+    let tint: Color
+    var actionTitle: String?
+    var actionHint: String?
+    var action: (() -> Void)?
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var stacksContent: Bool {
+        dynamicTypeSize.isAccessibilitySize && action != nil
+    }
+
+    var body: some View {
+        Group {
+            if stacksContent {
+                VStack(alignment: .leading, spacing: AppTheme.Spacing.sm) {
+                    HStack(alignment: .top, spacing: AppTheme.Spacing.sm) {
+                        iconChip
+                        textBlock
+                    }
+
+                    actionButton
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            } else {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.sm) {
+                    iconChip
+                    textBlock
+                    Spacer(minLength: AppTheme.Spacing.xxs)
+                    actionButton
+                }
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.md)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .veloraSurface(.card, padding: 0)
+    }
+
+    private var iconChip: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 38, height: 38)
+            .background(tint.opacity(0.12), in: Circle())
+            .contentTransition(.symbolEffect(.replace))
+            .accessibilityHidden(true)
+    }
+
+    private var textBlock: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+                .font(AppTheme.Typography.statusTitle)
+                .foregroundStyle(AppTheme.Colors.textPrimary)
+
+            Text(detail)
+                .font(AppTheme.Typography.statusDetail)
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .layoutPriority(1)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private var actionButton: some View {
+        if let actionTitle, let action {
+            Button(action: action) {
+                Text(actionTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(tint)
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .frame(minHeight: AppTheme.Control.compact)
+                    .background(Capsule(style: .continuous).fill(tint.opacity(0.14)))
+                    .overlay {
+                        Capsule(style: .continuous)
+                            .strokeBorder(tint.opacity(0.28), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(PressableButtonStyle(isEnabled: !reduceMotion))
+            .accessibilityLabel(actionTitle)
+            .accessibilityHint(actionHint ?? "")
+        }
+    }
+}
+
 struct MotionStatusCard: View {
     let presentation: MotionPresentation
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: presentation.symbol)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(presentation.tint)
-                .frame(width: 36, height: 36)
-                .background(presentation.tint.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(AppTheme.Typography.statusTitle)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-
-                Text(presentation.subtitle)
-                    .font(AppTheme.Typography.statusDetail)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .appCard(cornerRadius: 22, padding: 0)
-        .accessibilityElement(children: .combine)
+        StatusCard(
+            symbol: presentation.symbol,
+            title: presentation.title,
+            detail: presentation.subtitle,
+            tint: presentation.tint
+        )
     }
 }
 
@@ -319,96 +401,39 @@ struct GPSStatusCard: View {
     let onRequestPermission: () -> Void
     let onOpenSettings: () -> Void
 
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-
-    private var stacksContent: Bool {
-        dynamicTypeSize.isAccessibilitySize
-    }
-
     private var hasAction: Bool {
         showsPermissionAction
             && ((authorizationStatus == .notDetermined && servicesEnabled)
                 || authorizationStatus == .denied)
     }
 
+    private var actionTitle: String? {
+        guard hasAction else { return nil }
+        return authorizationStatus == .denied ? "Open Settings" : "Allow Access"
+    }
+
+    private var actionHint: String? {
+        guard hasAction else { return nil }
+        return authorizationStatus == .denied
+            ? "Opens the system settings to allow location access."
+            : "Requests location access while a trip is active."
+    }
+
+    private var action: (() -> Void)? {
+        guard hasAction else { return nil }
+        return authorizationStatus == .denied ? onOpenSettings : onRequestPermission
+    }
+
     var body: some View {
-        Group {
-            if stacksContent {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .top, spacing: 12) {
-                        iconChip
-                        textBlock
-                    }
-
-                    if hasAction {
-                        action
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
-            } else {
-                HStack(alignment: .center, spacing: 12) {
-                    iconChip
-                    textBlock
-                    Spacer(minLength: 4)
-                    action
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .appCard(cornerRadius: 22, padding: 0)
-    }
-
-    private var iconChip: some View {
-        Image(systemName: presentation.symbol)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(presentation.tint)
-            .frame(width: 36, height: 36)
-            .background(presentation.tint.opacity(0.12), in: Circle())
-            .accessibilityHidden(true)
-    }
-
-    private var textBlock: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(presentation.title)
-                .font(AppTheme.Typography.statusTitle)
-                .foregroundStyle(AppTheme.Colors.textPrimary)
-
-            Text(presentation.subtitle)
-                .font(AppTheme.Typography.statusDetail)
-                .foregroundStyle(AppTheme.Colors.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .layoutPriority(1)
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder
-    private var action: some View {
-        if !showsPermissionAction {
-            EmptyView()
-        } else if authorizationStatus == .notDetermined, servicesEnabled {
-            Button(action: onRequestPermission) {
-                Text("Allow")
-                    .font(.caption.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .accessibilityLabel("Allow location access")
-            .accessibilityHint("Requests location access while a trip is active.")
-        } else if authorizationStatus == .denied {
-            Button(action: onOpenSettings) {
-                Text("Open")
-                    .font(.caption.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-            }
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .accessibilityLabel("Open iOS Settings")
-            .accessibilityHint("Opens the system settings to allow location access.")
-        }
+        StatusCard(
+            symbol: presentation.symbol,
+            title: presentation.title,
+            detail: presentation.subtitle,
+            tint: presentation.tint,
+            actionTitle: actionTitle,
+            actionHint: actionHint,
+            action: action
+        )
     }
 }
 
@@ -418,24 +443,23 @@ struct MetricCard: View {
     let unit: String
     let symbol: String
     var isApproximate = false
+    var animationsEnabled = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    /// At accessibility sizes the unit moves below the value instead of
-    /// squeezing both into one line.
     private var stacksUnit: Bool {
         dynamicTypeSize.isAccessibilitySize
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
 
                 Text(title)
                     .font(AppTheme.Typography.label)
-                    .tracking(0.9)
+                    .tracking(1.0)
 
                 Spacer(minLength: 0)
             }
@@ -454,6 +478,8 @@ struct MetricCard: View {
                     .minimumScaleFactor(0.72)
                     .lineLimit(1)
                     .foregroundStyle(AppTheme.Colors.textPrimary)
+                    .contentTransition(animationsEnabled ? .numericText() : .identity)
+                    .animation(animationsEnabled ? VELORAMotion.readout : nil, value: value)
 
                 if !unit.isEmpty, !stacksUnit {
                     Text(unit)
@@ -468,8 +494,8 @@ struct MetricCard: View {
                     .foregroundStyle(AppTheme.Colors.textSecondary)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
-        .appCard(cornerRadius: 22, padding: 13)
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .veloraSurface(.card, padding: 15)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             AccessibilityText.metric(title: title, value: value, unit: unit, isApproximate: isApproximate)
@@ -484,11 +510,10 @@ struct MetricGrid: View {
     let elapsedSeconds: TimeInterval
     let unit: SpeedUnit
     let hasCoverageGaps: Bool
+    var animationsEnabled = true
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
-    /// One column at accessibility sizes: two narrow cards would truncate the
-    /// values instead of letting them grow.
     private var columns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
             ? [GridItem(.flexible())]
@@ -504,7 +529,8 @@ struct MetricGrid: View {
                 title: "MAX",
                 value: unit.formattedSpeed(maximumSpeedMetersPerSecond),
                 unit: unit.title,
-                symbol: "arrow.up.right"
+                symbol: "arrow.up.right",
+                animationsEnabled: animationsEnabled
             )
 
             MetricCard(
@@ -512,21 +538,24 @@ struct MetricGrid: View {
                 value: unit.formattedSpeed(averageSpeedMetersPerSecond),
                 unit: unit.title,
                 symbol: "waveform.path",
-                isApproximate: hasCoverageGaps
+                isApproximate: hasCoverageGaps,
+                animationsEnabled: animationsEnabled
             )
 
             MetricCard(
                 title: "DISTANCE",
                 value: unit.formattedDistance(distanceMeters),
                 unit: unit.distanceTitle,
-                symbol: "point.bottomleft.forward.to.point.topright.scurvepath"
+                symbol: "point.bottomleft.forward.to.point.topright.scurvepath",
+                animationsEnabled: animationsEnabled
             )
 
             MetricCard(
                 title: "TRIP TIME",
                 value: formattedDuration,
                 unit: "",
-                symbol: "clock"
+                symbol: "clock",
+                animationsEnabled: animationsEnabled
             )
         }
     }
@@ -537,40 +566,8 @@ struct MetricGrid: View {
     }
 }
 
-/// A button whose surface is a native Liquid Glass shape. The glass reacts to
-/// touch through the platform's own `interactive` behaviour, so the press
-/// feedback, the light refraction and the material depth all come from SwiftUI.
-struct GlassControlButton<Label: View, BorderShape: Shape>: View {
-    let glass: Glass
-    let borderShape: BorderShape
-    let isInteractive: Bool
-    let action: () -> Void
-    private let label: Label
-
-    init(
-        glass: Glass,
-        borderShape: BorderShape,
-        isInteractive: Bool = true,
-        action: @escaping () -> Void,
-        @ViewBuilder label: () -> Label
-    ) {
-        self.glass = glass
-        self.borderShape = borderShape
-        self.isInteractive = isInteractive
-        self.action = action
-        self.label = label()
-    }
-
-    var body: some View {
-        Button(action: action) {
-            label
-        }
-        .buttonStyle(.plain)
-        .contentShape(borderShape)
-        .glassEffect(glass.interactive(isInteractive), in: borderShape)
-    }
-}
-
+/// Trip controls. They keep their equality check, so a high-frequency GPS
+/// sample cannot rebuild them, while a state change still animates once.
 struct DriveControls: View, Equatable {
     let state: TripState
     /// Mirrors Reduce Motion and is part of the equality check, so toggling the
@@ -582,17 +579,15 @@ struct DriveControls: View, Equatable {
     let onResume: () -> Void
     let onReset: () -> Void
 
-    private let controlSize: CGFloat = 54
+    private let controlSize = AppTheme.Control.primary
     private let controlSpacing: CGFloat = 12
 
     static func == (lhs: DriveControls, rhs: DriveControls) -> Bool {
         lhs.state == rhs.state && lhs.animationsEnabled == rhs.animationsEnabled
     }
 
-    /// The closures are captured here rather than in the dashboard, so an
-    /// equatable render keeps working actions while ignoring new reader values.
     private func perform(_ action: @escaping () -> Void) {
-        withAnimation(animationsEnabled ? .snappy(duration: 0.25) : nil) {
+        withAnimation(animationsEnabled ? VELORAMotion.selection : nil) {
             action()
         }
     }
@@ -607,17 +602,16 @@ struct DriveControls: View, Equatable {
                         action: { perform(onStart) }
                     )
                 } else {
-                    GlassControlButton(
-                        glass: .regular.tint(AppTheme.Colors.glassSecondaryTint),
-                        borderShape: Circle(),
-                        isInteractive: animationsEnabled,
-                        action: { perform(onReset) }
-                    ) {
+                    Button {
+                        perform(onReset)
+                    } label: {
                         Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(AppTheme.Colors.glassLabel)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(AppTheme.Colors.textPrimary)
                             .frame(width: controlSize, height: controlSize)
                     }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
                     .accessibilityLabel("Reset Trip")
 
                     primaryControl(
@@ -638,18 +632,16 @@ struct DriveControls: View, Equatable {
         symbol: String,
         action: @escaping () -> Void
     ) -> some View {
-        GlassControlButton(
-            glass: .regular.tint(AppTheme.Colors.glassPrimaryTint),
-            borderShape: Capsule(),
-            isInteractive: animationsEnabled,
-            action: action
-        ) {
+        Button {
+            action()
+        } label: {
             Label(title, systemImage: symbol)
                 .font(.headline)
-                .foregroundStyle(AppTheme.Colors.glassLabel)
-                .labelStyle(.titleAndIcon)
                 .frame(maxWidth: .infinity)
                 .frame(height: controlSize)
         }
+        .buttonStyle(.glassProminent)
+        .buttonBorderShape(.capsule)
+        .tint(AppTheme.Colors.accent)
     }
 }

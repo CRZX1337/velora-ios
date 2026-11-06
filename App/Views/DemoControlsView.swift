@@ -7,11 +7,11 @@ struct DemoControlsView: View {
     var body: some View {
         Form {
             Section {
-                HStack(spacing: 12) {
+                HStack(spacing: AppTheme.Spacing.sm) {
                     Image(systemName: "testtube.2")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(AppTheme.Colors.warning)
-                        .frame(width: 36, height: 36)
+                        .frame(width: 38, height: 38)
                         .background(AppTheme.Colors.warning.opacity(0.12), in: Circle())
                         .accessibilityHidden(true)
 
@@ -52,7 +52,7 @@ struct DemoControlsView: View {
                         .foregroundStyle(AppTheme.Colors.textTertiary)
                 }
             } header: {
-                Text("Driving Profile")
+                Label("Driving Profile", systemImage: "road.lanes")
             }
 
             Section {
@@ -102,10 +102,10 @@ struct DemoControlsView: View {
                                 .foregroundStyle(AppTheme.Colors.textSecondary)
                         }
                     }
-                    .frame(minHeight: 44)
+                    .frame(minHeight: AppTheme.Control.compact)
                 }
             } header: {
-                Text("Playback")
+                Label("Playback", systemImage: "play.speedometer")
             } footer: {
                 Text("At 5× or 10× the simulated clock advances faster, while speed, distance and trip time remain physically consistent.")
             }
@@ -148,14 +148,14 @@ struct DemoControlsView: View {
                     Label("Restore GPS", systemImage: "location.fill")
                 }
                 .disabled(demo.signalMode == .live)
-                .frame(minHeight: 44)
+                .frame(minHeight: AppTheme.Control.compact)
 
                 Text("Below 35 m the dashboard reports a ready fix; above it the reading is low accuracy. Five seconds without a fix turn the reading stale.")
                     .font(.caption)
                     .foregroundStyle(AppTheme.Colors.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } header: {
-                Text("GPS Conditions")
+                Label("GPS Conditions", systemImage: "antenna.radiowaves.left.and.right")
             }
 
             Section {
@@ -164,7 +164,7 @@ struct DemoControlsView: View {
                 LabeledContent("Trip Time", value: formattedDuration)
                 LabeledContent("Demo Clock", value: String(format: "%.0f s", demo.simulatedElapsed))
             } header: {
-                Text("Live Readout")
+                Label("Live Readout", systemImage: "gauge.with.dots.needle.67percent")
             } footer: {
                 Text("Distance and trip time come from TripRecorder through the normal trip session, not from the demo timeline.")
             }
@@ -172,7 +172,7 @@ struct DemoControlsView: View {
             Section {
                 sessionControls
             } header: {
-                Text("Session")
+                Label("Session", systemImage: "record.circle")
             } footer: {
                 if !demo.isEnabled {
                     Text("Enable Demo Mode in Settings to start a simulated trip.")
@@ -186,6 +186,8 @@ struct DemoControlsView: View {
         .scrollContentBackground(.hidden)
         .background(AppBackground())
         .tint(AppTheme.Colors.accent)
+        .sensoryFeedback(.impact(weight: .light), trigger: demo.isRunning)
+        .sensoryFeedback(.impact(weight: .light), trigger: demo.isPaused)
     }
 
     @ViewBuilder
@@ -196,28 +198,28 @@ struct DemoControlsView: View {
             } label: {
                 Label("Pause Simulation", systemImage: "pause.fill")
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
 
             Button {
                 demo.stop()
             } label: {
                 Label("Stop Simulation", systemImage: "stop.fill")
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
         } else if demo.isPaused {
             Button {
                 demo.resume()
             } label: {
                 Label("Resume Simulation", systemImage: "play.fill")
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
 
             Button {
                 demo.stop()
             } label: {
                 Label("Stop Simulation", systemImage: "stop.fill")
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
         } else {
             Button {
                 demo.start()
@@ -225,7 +227,7 @@ struct DemoControlsView: View {
                 Label("Start Simulation", systemImage: "play.fill")
             }
             .disabled(!demo.isEnabled)
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
         }
 
         if demo.hasSession {
@@ -234,7 +236,7 @@ struct DemoControlsView: View {
             } label: {
                 Label("Reset Trip", systemImage: "arrow.counterclockwise")
             }
-            .frame(minHeight: 44)
+            .frame(minHeight: AppTheme.Control.compact)
         }
     }
 

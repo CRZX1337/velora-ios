@@ -40,7 +40,7 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.segmented)
                 } header: {
-                    Text("Units")
+                    Label("Units", systemImage: "ruler")
                 } footer: {
                     Text("Applies to the gauge and all trip data.")
                 }
@@ -49,7 +49,7 @@ struct SettingsView: View {
                     Toggle("Show Movement Status", isOn: $showsMotionStatus)
                     Toggle("Show GPS Status", isOn: $showsGPSStatus)
                 } header: {
-                    Text("Dashboard")
+                    Label("Dashboard", systemImage: "rectangle.3.group")
                 } footer: {
                     Text("These cards only change the display. GPS measurement, movement detection and distance recording continue unchanged.")
                 }
@@ -79,7 +79,7 @@ struct SettingsView: View {
                         .disabled(tripSession.state != .idle && !demo.hasSession)
                     }
                 } header: {
-                    Text("Developer & Demo Mode")
+                    Label("Developer & Demo Mode", systemImage: "hammer")
                 } footer: {
                     Text("Simulated trips run through the same speed, motion and distance pipeline. They are labeled DEMO MODE on the dashboard, never stored, and never leave the device.")
                 }
@@ -88,10 +88,12 @@ struct SettingsView: View {
                     NavigationLink {
                         GPSDiagnosticsView()
                     } label: {
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(currentStatus.tint)
-                                .frame(width: 8, height: 8)
+                        HStack(spacing: AppTheme.Spacing.sm) {
+                            Image(systemName: currentStatus.symbol)
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(currentStatus.tint)
+                                .frame(width: 26, height: 26)
+                                .background(currentStatus.tint.opacity(0.12), in: Circle())
                                 .accessibilityHidden(true)
 
                             VStack(alignment: .leading, spacing: 2) {
@@ -103,7 +105,7 @@ struct SettingsView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
 
-                            Spacer(minLength: 8)
+                            Spacer(minLength: AppTheme.Spacing.xs)
 
                             Text(locationService.isReceivingUpdates ? "Active" : "Inactive")
                                 .font(.caption)
@@ -115,14 +117,14 @@ struct SettingsView: View {
 
                     LabeledContent("Accuracy", value: accuracyText)
                 } header: {
-                    Text("Location")
+                    Label("Location", systemImage: "location")
                 }
 
                 Section {
                     Label("Location data stays on this device.", systemImage: "lock.shield")
                         .font(.subheadline.weight(.medium))
                 } header: {
-                    Text("Privacy")
+                    Label("Privacy", systemImage: "hand.raised")
                 } footer: {
                     Text("GPS Diagnostics never shows coordinates or addresses.")
                 }
@@ -133,7 +135,7 @@ struct SettingsView: View {
                     LabeledContent("Build", value: buildNumber)
                     LabeledContent("Bundle Identifier", value: bundleIdentifier)
                 } header: {
-                    Text("About Velora")
+                    Label("About Velora", systemImage: "info.circle")
                 } footer: {
                     Text("Native GPS Speedometer for iOS")
                 }
@@ -150,7 +152,12 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(AppBackground())
+            .scrollEdgeEffectStyle(.soft, for: .top)
             .tint(AppTheme.Colors.accent)
+            .sensoryFeedback(.selection, trigger: storedUnit)
+            .sensoryFeedback(.selection, trigger: demo.isEnabled)
+            .sensoryFeedback(.selection, trigger: showsMotionStatus)
+            .sensoryFeedback(.selection, trigger: showsGPSStatus)
         }
     }
 

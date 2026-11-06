@@ -15,6 +15,15 @@ enum AccessibilityText {
         return unit.isEmpty ? trimmed : "\(trimmed) \(unit)"
     }
 
+    /// The dial reports the measurement and the state it is in, so VoiceOver
+    /// users learn "searching" or "low accuracy" without seeing the caption.
+    static func gaugeValue(_ value: String, spokenUnit: String, stateCaption: String) -> String {
+        let reading = speedValue(value, spokenUnit: spokenUnit)
+        let caption = stateCaption.trimmingCharacters(in: .whitespaces)
+        guard reading != noReading, !caption.isEmpty else { return reading }
+        return "\(reading), \(caption.lowercased())"
+    }
+
     static func metric(title: String, value: String, unit: String, isApproximate: Bool) -> String {
         var parts = [title]
         if isApproximate { parts.append("approximately") }

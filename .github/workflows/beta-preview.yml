@@ -1,0 +1,153 @@
+name: Beta preview
+
+# Builds the `beta` branch natively on the GitHub-hosted macOS image
+# (Xcode 27.2 / iPhoneOS 27.2) and uploads the IPA as a workflow artifact.
+#
+# This workflow only builds and uploads. It never publishes: no release, no
+# tag, no `beta-latest` asset, no branch or tag pushes, and no secrets. The
+# stable pipeline stays beta-release.yml, which runs for `main` only; nothing
+# here is promoted or merged automatically.
+
+on:
+  push:
+    branches: [beta]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: beta-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ipa:
+    name: Build beta IPA (hosted macOS, Xcode 27.2)
+    runs-on: xcode-27
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      # Same runner, same developer directory and the same SDK assertions as
+      # scripts/../../.github/workflows/beta-release.yml: the proven macOS
+      # toolchain is reused verbatim instead of being re-invented.
+      - name: Select Xcode 27.2 and verify the toolchain
+        run: |
+          set -euo pipefail
+
+          developer_dir=/Applications/Xcode_27.2.app
+          if [ ! -d "$developer_dir" ]; then
+            echo '::error::Xcode 27.2 is not installed on this image'
+            ls -1 /Applications
+            exit 1
+          fi
+
+          sudo xcode-select -s "$developer_dir"
+
+          xcodebuild -version
+          xcode_version="$(xcodebuild -version | head -n 1)"
+          if [ "$xcode_version" != 'Xcode 27.2' ]; then
+            echo "::error::expected Xcode 27.2, found $xcode_version"
+            exit 1
+          fi
+
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          xcrun --sdk iphoneos --show-sdk-path
+          if [ "$sdk_version" != '27.2' ]; then
+            echo "::error::expected iPhoneOS 27.2, found $sdk_version"
+            exit 1
+          fi
+
+          swift --version
+          xcrun swiftc --version
+          xcodebuild -showsdks
+
+          for tool in zip ditto codesign plutil xcrun; do
+            printf '%s: ' "$tool"
+            command -v "$tool" || { echo '::error::missing packaging tool'; exit 1; }
+          done
+
+      - name: Run Foundation tests
+        run: |
+          set -euo pipefail
+          output="$(bash ./scripts/run-tests.sh 2>&1)"
+          status=$?
+          printf '%s\n' "$output"
+          [ "$status" -eq 0 ] || { echo "::error::Foundation tests exited with code $status"; exit "$status"; }
+
+          if [[ "$output" =~ ([0-9]+)\ checks,\ ([0-9]+)\ failures ]]; then
+            checks="${BASH_REMATCH[1]}"
+            failures="${BASH_REMATCH[2]}"
+          else
+            echo '::error::The test runner did not print a summary line'
+            exit 1
+          fi
+          echo "::notice title=Foundation tests::$checks checks, $failures failures"
+          [ "$failures" -eq 0 ] || { echo "::error::$failures failing checks"; exit 1; }
+
+      - name: Build with xcodebuild
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Velora.xcodeproj \
+            -target Speedometer \
+            -configuration Release \
+            -sdk iphoneos \
+            CONFIGURATION_BUILD_DIR="$PWD/build/Release-iphoneos" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: bash ./scripts/package-ipa.sh build/Release-iphoneos/Speedometer.app artifacts/Velora-beta-preview.ipa
+
+      - name: Verify IPA
+        run: python3 ./scripts/verify-ipa.py artifacts/Velora-beta-preview.ipa
+
+      - name: Write checksum and build information
+        run: |
+          set -euo pipefail
+          cd artifacts
+          shasum -a 256 Velora-beta-preview.ipa > Velora-beta-preview.ipa.sha256
+          size=$(wc -c <Velora-beta-preview.ipa | tr -d ' ')
+          digest=$(awk '{print $1}' Velora-beta-preview.ipa.sha256)
+          {
+            echo 'Velora beta preview'
+            echo "commit: $GITHUB_SHA"
+            echo "branch: $GITHUB_REF_NAME"
+            echo "run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "xcode: $(xcodebuild -version | tr '\n' ' ')"
+            echo "iphoneos-sdk: $(xcrun --sdk iphoneos --show-sdk-version)"
+            echo "size: $size bytes"
+            echo "sha256: $digest"
+          } > beta-build-info.txt
+          cat beta-build-info.txt
+
+      - name: Report package summary
+        run: |
+          set -euo pipefail
+          {
+            echo '### Velora beta preview IPA'
+            echo
+            echo "- Commit: \`$GITHUB_SHA\`"
+            echo "- Branch: \`$GITHUB_REF_NAME\`"
+            echo "- Size: $(wc -c <artifacts/Velora-beta-preview.ipa | tr -d ' ') bytes"
+            echo "- SHA-256: \`$(awk '{print $1}' artifacts/Velora-beta-preview.ipa.sha256)\`"
+            echo '- Bundle: `com.velora.app` / Velora / iOS 26.0 / Speedometer'
+            echo '- Privacy manifest: packaged and identical to the source'
+            echo '- This run publishes nothing: the IPA is only an artifact of this run.'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload beta preview artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: Velora-beta-preview-${{ github.sha }}
+          path: |
+            artifacts/Velora-beta-preview.ipa
+            artifacts/Velora-beta-preview.ipa.sha256
+            artifacts/beta-build-info.txt
+          if-no-files-found: error
+          retention-days: 14

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-struct GaugeScale {
+struct GaugeScale: Equatable {
     let maximum: Double
     let labels: [Double]
 
@@ -15,16 +15,72 @@ struct GaugeScale {
     }
 }
 
+/// What the dial communicates right now. Every case is derived from CoreLocation
+/// and the trip state; nothing here invents a measurement or a GPS lock.
+enum GaugeState: Equatable {
+    case inactive
+    case searching
+    case live
+    case degraded
+    case paused
+
+    var caption: String {
+        switch self {
+        case .inactive: "NOT STARTED"
+        case .searching: "SEARCHING"
+        case .live: "GPS ACTIVE"
+        case .degraded: "LOW ACCURACY"
+        case .paused: "PAUSED"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .inactive: "circle.dashed"
+        case .searching: "location"
+        case .live: "location.fill"
+        case .degraded: "exclamationmark.triangle"
+        case .paused: "pause.fill"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .inactive: AppTheme.Colors.textTertiary
+        case .searching: AppTheme.Colors.textSecondary
+        case .live: AppTheme.Colors.success
+        case .degraded, .paused: AppTheme.Colors.warning
+        }
+    }
+
+    static func make(status: GPSStatus, tripState: TripState, hasReading: Bool) -> GaugeState {
+        if tripState == .paused { return .paused }
+
+        switch status {
+        case .servicesDisabled, .permissionDenied, .error:
+            return .inactive
+        case .inaccurate, .stale:
+            return .degraded
+        case .ready:
+            return hasReading ? .live : .searching
+        case .permissionRequired, .starting, .waitingForFirstFix:
+            return tripState == .idle && !hasReading ? .inactive : .searching
+        }
+    }
+}
+
 struct SpeedGauge: View {
-    let progress: Double
+    /// The measured value in the displayed unit. Only the dial's presentation
+    /// interpolates; the engine, recorder and session never see this view.
+    let speed: Double
     let valueText: String
     let unitTitle: String
     let unitSpokenTitle: String
-    let isLive: Bool
+    let state: GaugeState
     let diameter: CGFloat
     let scale: GaugeScale
-    /// Simulated fixes arrive many times per second. The numeric transition is
-    /// skipped so the digits settle instead of animating continuously.
+    /// Simulated fixes arrive many times per second, so the digits settle
+    /// instead of rolling on every synthetic sample.
     var isSimulated = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,133 +89,202 @@ struct SpeedGauge: View {
 
     private let startAngle: Double = 135
     private let sweep: Double = 270
+    private let labelCount = 28
 
     private var clampedProgress: Double {
-        min(max(progress, 0), 1)
+        min(max(speed / scale.maximum, 0), 1)
     }
 
     private var ringWidth: CGFloat {
-        max(10, diameter * 0.034)
+        max(11, diameter * 0.036)
     }
 
-    /// The dial is a fixed-size instrument: Dynamic Type grows the digits, but
-    /// they stay inside the ring. A missing reading is drawn smaller so the
-    /// placeholder dash does not read as a progress bar.
     private var isPlaceholder: Bool {
         valueText == "—"
     }
 
     private var speedFontSize: CGFloat {
-        let base = isPlaceholder
-            ? diameter * 0.10 * typeScale
-            : diameter * 0.28 * typeScale
-        let limit = diameter * (isPlaceholder ? 0.14 : 0.30)
-        return min(base, limit)
+        let base = isPlaceholder ? diameter * 0.10 * typeScale : diameter * 0.285 * typeScale
+        return min(base, diameter * (isPlaceholder ? 0.15 : 0.31))
     }
 
     private var unitFontSize: CGFloat {
-        min(diameter * 0.052 * unitScale, diameter * 0.075)
+        min(diameter * 0.050 * unitScale, diameter * 0.072)
     }
 
-    /// Both rings are single, fully opaque strokes. The active arc used to be
-    /// an AngularGradient whose opacity climbed from 0.35 to 1.0, so a short arc
-    /// sat entirely in the grey start and a long arc faded from grey to white.
-    /// A solid colour removes that speed-dependent brightness without an extra
-    /// overlay. `Color.primary` is white in Dark Mode and graphite in Light
-    /// Mode, where pure white would disappear against the paper background.
-    private var trackColor: Color {
-        Color.primary.opacity(0.12)
-    }
-
-    private var activeColor: Color {
-        Color.primary
+    private var arcColor: Color {
+        switch state {
+        case .degraded, .paused: AppTheme.Colors.warning
+        case .inactive, .searching, .live: AppTheme.Colors.gaugeProgress
+        }
     }
 
     var body: some View {
         ZStack {
-            Circle()
-                .trim(from: 0, to: sweep / 360)
-                .stroke(
-                    trackColor,
-                    style: StrokeStyle(lineWidth: ringWidth, lineCap: .butt)
-                )
-                .rotationEffect(.degrees(startAngle))
-
-            Circle()
-                .trim(from: 0, to: sweep / 360 * clampedProgress)
-                .stroke(
-                    activeColor,
-                    style: StrokeStyle(lineWidth: ringWidth * 0.62, lineCap: .round)
-                )
-                .rotationEffect(.degrees(startAngle))
-                .opacity(clampedProgress > 0.001 ? 1 : 0)
-                .animation(
-                    reduceMotion || isSimulated ? nil : .smooth(duration: 0.38),
-                    value: clampedProgress
-                )
-
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [AppTheme.Colors.gaugeSheen, .clear],
-                        center: UnitPoint(x: 0.5, y: 0.34),
-                        startRadius: 0,
-                        endRadius: diameter * 0.46
-                    )
-                )
-                .padding(ringWidth * 1.4)
-                .allowsHitTesting(false)
-
+            disc
+            track
+            progressArc
             ticks
-
-            Circle()
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 1)
-                .padding(diameter * 0.115)
-
-            VStack(spacing: 6) {
-                Text(valueText)
-                    .font(.system(size: speedFontSize, weight: .thin, design: .rounded))
-                    .monospacedDigit()
-                    .tracking(-0.5)
-                    .minimumScaleFactor(0.5)
-                    .lineLimit(1)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                    .contentTransition(isSimulated ? .identity : .numericText())
-                    .animation(
-                        reduceMotion || isSimulated ? nil : .snappy(duration: 0.24),
-                        value: valueText
-                    )
-
-                Text(unitTitle.uppercased())
-                    .font(.system(size: unitFontSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .tracking(2.2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-            }
-            .padding(.horizontal, diameter * 0.18)
+            innerHairline
+            indicator
+            readout
         }
         .frame(width: diameter, height: diameter)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(AccessibilityText.speedLabel)
-        .accessibilityValue(AccessibilityText.speedValue(valueText, spokenUnit: unitSpokenTitle))
+        .accessibilityValue(
+            AccessibilityText.gaugeValue(valueText, spokenUnit: unitSpokenTitle, stateCaption: state.caption)
+        )
     }
+
+    // MARK: - Layers
+
+    private var disc: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [AppTheme.Colors.gaugeDisc, .clear],
+                    center: UnitPoint(x: 0.5, y: 0.34),
+                    startRadius: 0,
+                    endRadius: diameter * 0.47
+                )
+            )
+            .padding(ringWidth * 1.6)
+            .overlay {
+                Circle()
+                    .strokeBorder(AppTheme.Colors.hairline, lineWidth: 1)
+                    .padding(ringWidth * 1.6)
+            }
+            .allowsHitTesting(false)
+    }
+
+    private var track: some View {
+        Circle()
+            .trim(from: 0, to: sweep / 360)
+            .stroke(
+                AppTheme.Colors.gaugeTrack,
+                style: StrokeStyle(lineWidth: ringWidth, lineCap: .butt)
+            )
+            .rotationEffect(.degrees(startAngle))
+    }
+
+    private var progressArc: some View {
+        Circle()
+            .trim(from: 0, to: sweep / 360 * clampedProgress)
+            .stroke(
+                arcColor,
+                style: StrokeStyle(lineWidth: ringWidth * 0.58, lineCap: .round)
+            )
+            .rotationEffect(.degrees(startAngle))
+            .opacity(clampedProgress > 0.001 ? 1 : 0)
+            .animation(VELORAMotion.resolve(VELORAMotion.gauge, reduceMotion: reduceMotion), value: clampedProgress)
+    }
+
+    /// One dot rides the arc's tip. It rotates rather than being redrawn, so the
+    /// movement is a transform and stays cheap while the arc trims.
+    private var indicator: some View {
+        ZStack {
+            Color.clear
+
+            Circle()
+                .fill(arcColor)
+                .frame(width: ringWidth * 0.92, height: ringWidth * 0.92)
+                .overlay {
+                    Circle()
+                        .strokeBorder(AppTheme.Colors.canvas.opacity(0.55), lineWidth: 1)
+                }
+                .offset(y: -(diameter / 2 - ringWidth * 1.1))
+        }
+        .opacity(clampedProgress > 0.001 ? 1 : 0)
+        .rotationEffect(.degrees(startAngle + sweep * clampedProgress + 90))
+        .animation(VELORAMotion.resolve(VELORAMotion.gauge, reduceMotion: reduceMotion), value: clampedProgress)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private var innerHairline: some View {
+        Circle()
+            .strokeBorder(AppTheme.Colors.hairline, lineWidth: 1)
+            .padding(diameter * 0.155)
+    }
+
+    private var readout: some View {
+        VStack(spacing: 0) {
+            Text(valueText)
+                .font(.system(size: speedFontSize, weight: .ultraLight, design: .rounded))
+                .monospacedDigit()
+                .tracking(-1.2)
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .foregroundStyle(AppTheme.Colors.textPrimary)
+                .contentTransition(
+                    isSimulated || reduceMotion ? .identity : .numericText(value: speed)
+                )
+                .animation(
+                    VELORAMotion.resolve(VELORAMotion.readout, reduceMotion: reduceMotion),
+                    value: valueText
+                )
+
+            Text(unitTitle.uppercased())
+                .font(.system(size: unitFontSize, weight: .semibold, design: .rounded))
+                .foregroundStyle(AppTheme.Colors.textSecondary)
+                .tracking(2.4)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .padding(.top, 2)
+
+            statusChip
+                .padding(.top, 12)
+        }
+        .padding(.horizontal, diameter * 0.19)
+    }
+
+    private var statusChip: some View {
+        HStack(spacing: 5) {
+            Image(systemName: state.symbol)
+                .font(.system(size: 8, weight: .bold))
+                .symbolEffect(
+                    .pulse,
+                    options: .repeating,
+                    isActive: state == .searching && !reduceMotion
+                )
+                .contentTransition(.symbolEffect(.replace))
+
+            Text(state.caption)
+                .font(.system(size: 8.5, weight: .bold))
+                .tracking(1.1)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+        .foregroundStyle(state.tint)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background {
+            Capsule(style: .continuous)
+                .fill(state.tint.opacity(0.10))
+        }
+        .overlay {
+            Capsule(style: .continuous)
+                .strokeBorder(state.tint.opacity(0.26), lineWidth: 1)
+        }
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    // MARK: - Ticks
 
     private var ticks: some View {
         Canvas { context, size in
             let center = CGPoint(x: size.width / 2, y: size.height / 2)
             let outerRadius = min(size.width, size.height) / 2
+            let tickOuter = outerRadius - ringWidth - 2
+            let majorLength = max(9, diameter * 0.030)
+            let minorLength = max(4, diameter * 0.015)
 
-            let tickOuter = outerRadius - ringWidth - 3
-            let majorLength = max(9, diameter * 0.032)
-            let minorLength = max(4, diameter * 0.016)
-
-            let minorCount = 28
-            for index in 0...minorCount {
-                let fraction = Double(index) / Double(minorCount)
+            for index in 0...labelCount {
+                let fraction = Double(index) / Double(labelCount)
                 let angle = Angle.degrees(startAngle + fraction * sweep).radians
                 let isMajor = scale.labels.contains { label in
-                    abs(label / scale.maximum - fraction) < 0.001
+                    abs(label / scale.maximum - fraction) < 0.0015
                 }
                 let length = isMajor ? majorLength : minorLength
                 let inner = tickOuter - length
@@ -176,17 +301,13 @@ struct SpeedGauge: View {
 
                 context.stroke(
                     path,
-                    with: .color(
-                        isMajor
-                            ? AppTheme.Colors.textSecondary.opacity(0.90)
-                            : AppTheme.Colors.textTertiary.opacity(0.55)
-                    ),
-                    lineWidth: isMajor ? 1.6 : 1
+                    with: .color(isMajor ? AppTheme.Colors.gaugeTickMajor : AppTheme.Colors.gaugeTickMinor),
+                    lineWidth: isMajor ? 1.7 : 1
                 )
             }
 
-            let labelRadius = outerRadius - ringWidth - majorLength - 14
-            let fontSize = max(9, diameter * 0.034)
+            let labelRadius = outerRadius - ringWidth - majorLength - 16
+            let fontSize = max(9, diameter * 0.033)
             for label in scale.labels {
                 let fraction = label / scale.maximum
                 let angle = Angle.degrees(startAngle + fraction * sweep).radians

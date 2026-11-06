@@ -24,10 +24,15 @@ struct GPSDiagnosticsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DiagnosticStatusBanner(presentation: presentation)
-                .padding(.horizontal, AppTheme.Spacing.lg)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
+            StatusCard(
+                symbol: presentation.symbol,
+                title: presentation.title,
+                detail: presentation.subtitle,
+                tint: presentation.tint
+            )
+            .padding(.horizontal, AppTheme.Spacing.lg)
+            .padding(.top, AppTheme.Spacing.xs)
+            .padding(.bottom, AppTheme.Spacing.xxs)
 
             Form {
                 Section {
@@ -36,7 +41,7 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Location Services", locationService.servicesEnabled ? "Enabled" : "Disabled")
                     DiagnosticRow("Updates", locationService.isReceivingUpdates ? "Active" : "Inactive")
                 } header: {
-                    Text("Status")
+                    Label("Status", systemImage: "checklist")
                 }
 
                 Section {
@@ -48,7 +53,7 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Raw Speed", formattedSpeed(locationService.lastReportedSpeed))
                     DiagnosticRow("Speed Accuracy", formattedSpeedAccuracy(locationService.lastReportedSpeedAccuracy))
                 } header: {
-                    Text("Reception")
+                    Label("Reception", systemImage: "antenna.radiowaves.left.and.right")
                 }
 
                 Section {
@@ -57,7 +62,7 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Age", formattedAge(tripSession.speedReading.age))
                     DiagnosticRow("Held", tripSession.speedReading.isHeld ? "Yes" : "No")
                 } header: {
-                    Text("Speed Reading")
+                    Label("Speed Reading", systemImage: "speedometer")
                 }
 
                 Section {
@@ -69,7 +74,7 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Decision Conflict", tripSession.decisionConflict ? "Yes" : "No")
                     DiagnosticRow("Last Segment Resolution", resolutionText(tripSession.lastSegmentResolution))
                 } header: {
-                    Text("Movement Decision")
+                    Label("Movement Decision", systemImage: "arrow.left.arrow.right")
                 }
 
                 Section {
@@ -88,7 +93,7 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Native Reason", diagnostics.nativeReason)
                     DiagnosticRow("Decimated Samples", "\(diagnostics.decimatedSamples)")
                 } header: {
-                    Text("Regression Window")
+                    Label("Regression Window", systemImage: "chart.xyaxis.line")
                 }
 
                 Section {
@@ -104,23 +109,22 @@ struct GPSDiagnosticsView: View {
                     DiagnosticRow("Ledger Balanced", tripSession.ledgerBalanced ? "Yes" : "No")
                     DiagnosticRow("Duplicate Resolutions", "\(tripSession.doubleResolutionAttempts)")
                 } header: {
-                    Text("Distance & Coverage")
+                    Label("Distance & Coverage", systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
                 }
 
                 if locationService.lastErrorCode != nil {
                     Section {
                         DiagnosticRow("Last Error", lastErrorDescription)
                     } header: {
-                        Text("Error")
+                        Label("Error", systemImage: "exclamationmark.triangle")
                     }
                 }
 
                 Section {
-                    Text("No coordinates or addresses are shown or stored.")
+                    Label("No coordinates or addresses are shown or stored.", systemImage: "lock.shield")
                         .font(.caption)
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
-
             }
             .scrollContentBackground(.hidden)
         }
@@ -229,38 +233,6 @@ struct GPSDiagnosticsView: View {
     }
 }
 
-/// The one persistent status summary above the raw numbers. It answers the
-/// question the rows below only detail, without hiding any measurement.
-private struct DiagnosticStatusBanner: View {
-    let presentation: GPSStatusPresentation
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            Image(systemName: presentation.symbol)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(presentation.tint)
-                .frame(width: 44, height: 44)
-                .background(presentation.tint.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(presentation.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-
-                Text(presentation.subtitle)
-                    .font(.caption)
-                    .foregroundStyle(AppTheme.Colors.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// A diagnostics row that keeps the label quiet and the value precise:
 /// tabular digits, right aligned, allowed to wrap instead of truncating.
 private struct DiagnosticRow: View {
@@ -278,7 +250,7 @@ private struct DiagnosticRow: View {
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.Colors.textSecondary)
 
-            Spacer(minLength: 8)
+            Spacer(minLength: AppTheme.Spacing.xs)
 
             Text(value)
                 .font(.subheadline)

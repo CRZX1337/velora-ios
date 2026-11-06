@@ -31,7 +31,10 @@ EXPECTED_INFO = {
     "CFBundleDisplayName": "Velora",
     "CFBundleExecutable": "Speedometer",
     "CFBundleName": "Velora",
+    "CFBundleVersion": "1",
     "CFBundleShortVersionString": "1.0",
+    "CFBundleDevelopmentRegion": "en",
+    "NSHumanReadableCopyright": "\u00a9 2026 VELORA",
     "MinimumOSVersion": "26.0",
     "LSRequiresIPhoneOS": True,
     "UIDeviceFamily": [1],
@@ -46,6 +49,7 @@ ICONS = (("AppIcon60x60@2x.png", 120), ("AppIcon60x60@3x.png", 180))
 BUNDLE_ROOT = "Payload/Speedometer.app"
 LC_CODE_SIGNATURE = 0x1D
 CSMAGIC_EMBEDDED_SIGNATURE = 0xFADE0CC0
+CSMAGIC_CODEDIRECTORY = 0xFADE0C02
 MH_MAGIC_64 = 0xFEEDFACF
 CPU_TYPE_ARM64 = 0x0100000C
 MH_EXECUTE = 2
@@ -74,7 +78,12 @@ def collect_problems(ipa: str, source_manifest: str) -> tuple[list[str], list[st
     if "NSLocationWhenInUseUsageDescription" not in info:
         problems.append("missing NSLocationWhenInUseUsageDescription")
 
-    manifest = plistlib.loads(archive.read(f"{BUNDLE_ROOT}/PrivacyInfo.xcprivacy"))
+    packaged_manifest = archive.read(f"{BUNDLE_ROOT}/PrivacyInfo.xcprivacy")
+    with open(source_manifest, "rb") as handle:
+        source_bytes = handle.read()
+    if packaged_manifest != source_bytes:
+        problems.append(f"packaged privacy manifest is not byte-identical to {source_manifest}")
+    manifest = plistlib.loads(packaged_manifest)
     with open(source_manifest, "rb") as handle:
         source = plistlib.load(handle)
     if manifest != source:
@@ -119,6 +128,16 @@ def collect_problems(ipa: str, source_manifest: str) -> tuple[list[str], list[st
         signature_magic = struct.unpack(">I", signature[:4])[0]
         if signature_magic != CSMAGIC_EMBEDDED_SIGNATURE:
             problems.append(f"unexpected code signature magic {signature_magic:#x}")
+        else:
+            blob_count = struct.unpack(">I", signature[8:12])[0]
+            directories = 0
+            for index in range(blob_count):
+                _kind, blob_offset = struct.unpack(">II", signature[12 + index * 8 : 20 + index * 8])
+                magic = struct.unpack(">I", signature[blob_offset : blob_offset + 4])[0]
+                if magic == CSMAGIC_CODEDIRECTORY:
+                    directories += 1
+            if directories != 1:
+                problems.append(f"expected one CodeDirectory in the signature, found {directories}")
 
     print(f"IPA: {ipa} ({os.path.getsize(ipa)} bytes, sha256 {hashlib.sha256(open(ipa, 'rb').read()).hexdigest()})")
     print(f"Entries: {names}")
@@ -129,6 +148,7 @@ def collect_problems(ipa: str, source_manifest: str) -> tuple[list[str], list[st
     )
     print(f"Privacy APIs: {declared}, tracking={manifest['NSPrivacyTracking']}")
     print(f"Signature: {'ad-hoc superblob present' if signature is not None else 'none'}")
+    print(f"Copyright: {info.get('NSHumanReadableCopyright')!r}, region {info.get('CFBundleDevelopmentRegion')!r}")
     return problems, names
 
 
