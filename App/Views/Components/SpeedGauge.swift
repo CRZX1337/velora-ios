@@ -70,16 +70,16 @@ enum GaugeState: Equatable {
 }
 
 struct SpeedGauge: View {
-    /// Display-only curve in meters per second. The number, the arc and the tip
-    /// all read this one curve; the authoritative measurement stays in
-    /// `SpeedReading` and is never replaced by it.
-    let display: SpeedDisplayCurve
-    /// Whether the session currently holds a measured reading. The curve carries
-    /// the presentation; this only decides whether the dial shows a number.
-    let hasReading: Bool
+    /// Latest measured speed in meters per second, or nil before a trip starts.
+    /// The measurement itself is never smoothed: the number is quantised for
+    /// display and SwiftUI carries the glyphs to the new value.
+    let value: Double?
     let unit: SpeedUnit
     let state: GaugeState
     let diameter: CGFloat
+    /// Demo playback feeds samples many times per second; its roll is skipped so
+    /// the digits settle instead of animating continuously.
+    var animationsEnabled = true
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ScaledMetric(relativeTo: .largeTitle) private var typeScale: CGFloat = 1
@@ -88,7 +88,6 @@ struct SpeedGauge: View {
     private let startAngle: Double = 135
     private let sweep: Double = 270
     private let labelCount = 28
-    private let framesPerSecond: Double = 60
 
     // MARK: - Derived
 
@@ -96,26 +95,36 @@ struct SpeedGauge: View {
         GaugeScale.make(for: unit)
     }
 
-    /// Reduce Motion keeps the measurement and drops the travel: the same value,
-    /// drawn as one frame.
-    private var drawnDisplay: SpeedDisplayCurve {
-        reduceMotion
-            ? SpeedDisplayCurve(target: display.target, response: display.response)
-            : display
+    /// Reduce Motion keeps the value and drops the travel.
+    private var animates: Bool {
+        animationsEnabled && !reduceMotion
     }
 
-    private var dialIsResting: Bool {
-        drawnDisplay.isSettled(at: Date.timeIntervalSinceReferenceDate)
+    /// One whole number in display units. Digits, arc and tip all read it, so
+    /// they cannot drift apart, and an unchanged value produces no work at all.
+    private var displayed: Int? {
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        let converted = unit.speed(fromMetersPerSecond: value)
+        guard converted.isFinite else { return nil }
+        // A corrupt fix may be absurdly large; the dial must never trap on it.
+        return Int(min(converted, 9_999).rounded())
+    }
+
+    private var progress: Double {
+        guard let displayed else { return 0 }
+        return min(max(Double(displayed) / scale.maximum, 0), 1)
     }
 
     private var ringWidth: CGFloat {
         max(11, diameter * 0.036)
     }
 
-    /// One size for the digit slot so the unit and caption never shift when the
-    /// first fix arrives; the placeholder simply sits smaller in the same slot.
     private var readoutFontSize: CGFloat {
         min(diameter * 0.285 * typeScale, diameter * 0.31)
+    }
+
+    private var readoutFont: Font {
+        .system(size: readoutFontSize, weight: .ultraLight, design: .rounded)
     }
 
     private var readoutSlotHeight: CGFloat {
@@ -153,7 +162,7 @@ struct SpeedGauge: View {
 
     private var accessibilityValue: String {
         AccessibilityText.gaugeValue(
-            hasReading ? unit.formattedSpeed(display.target) : "—",
+            value.map { unit.formattedSpeed($0) } ?? "—",
             spokenUnit: unit.spokenTitle,
             stateCaption: state.caption
         )
@@ -196,29 +205,18 @@ struct SpeedGauge: View {
             .padding(diameter * 0.155)
     }
 
-    /// Arc, tip and digits are drawn per frame from the same curve, so the dial
-    /// is one continuous instrument rather than three animations that can drift
-    /// apart. The schedule stops the moment the value has settled.
+    /// Arc, tip and digits share one displayed value; each animates with the
+    /// dial's own curve, so a new fix moves the whole instrument once.
     private var instrument: some View {
-        TimelineView(.animation(minimumInterval: 1 / framesPerSecond, paused: dialIsResting)) { context in
-            let value = drawnDisplay.value(at: context.date.timeIntervalSinceReferenceDate)
-            let progress = progress(for: value)
-
-            ZStack {
-                arc(progress: progress)
-                tip(progress: progress)
-                readout(value: value)
-            }
-            .frame(width: diameter, height: diameter)
+        ZStack {
+            arc
+            tip
+            readout
         }
+        .frame(width: diameter, height: diameter)
     }
 
-    private func progress(for metersPerSecond: Double) -> Double {
-        let value = unit.speed(fromMetersPerSecond: max(0, metersPerSecond))
-        return min(max(value / scale.maximum, 0), 1)
-    }
-
-    private func arc(progress: Double) -> some View {
+    private var arc: some View {
         Circle()
             .trim(from: 0, to: sweep / 360 * progress)
             .stroke(
@@ -227,11 +225,13 @@ struct SpeedGauge: View {
             )
             .rotationEffect(.degrees(startAngle))
             .opacity(progress > 0.001 ? 1 : 0)
+            .animation(animates ? VELORAMotion.gauge : nil, value: progress)
+            .accessibilityHidden(true)
     }
 
     /// One dot rides the arc's tip. It rotates rather than being redrawn, so the
     /// movement is a transform and stays cheap while the arc trims.
-    private func tip(progress: Double) -> some View {
+    private var tip: some View {
         ZStack {
             Color.clear
 
@@ -246,26 +246,14 @@ struct SpeedGauge: View {
         }
         .opacity(progress > 0.001 ? 1 : 0)
         .rotationEffect(.degrees(startAngle + sweep * progress + 90))
+        .animation(animates ? VELORAMotion.gauge : nil, value: progress)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func readout(value: Double) -> some View {
+    private var readout: some View {
         VStack(spacing: 0) {
-            Text(hasReading ? formatted(value) : "—")
-                .font(
-                    .system(
-                        size: hasReading ? readoutFontSize : placeholderFontSize,
-                        weight: .ultraLight,
-                        design: .rounded
-                    )
-                )
-                .monospacedDigit()
-                .tracking(-1.2)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-                .foregroundStyle(hasReading ? AppTheme.Colors.textPrimary : AppTheme.Colors.textTertiary)
-                .frame(height: readoutSlotHeight)
+            numberSlot
 
             Text(unit.title.uppercased())
                 .font(.system(size: unitFontSize, weight: .semibold, design: .rounded))
@@ -281,12 +269,35 @@ struct SpeedGauge: View {
         .padding(.horizontal, diameter * 0.19)
     }
 
-    /// Formats the drawn value in the displayed unit. Tabular digits and a fixed
-    /// slot keep the width stable while the number travels.
-    private func formatted(_ metersPerSecond: Double) -> String {
-        guard metersPerSecond.isFinite, metersPerSecond >= 0 else { return "—" }
-        return unit.speed(fromMetersPerSecond: metersPerSecond)
-            .formatted(.number.precision(.fractionLength(0)))
+    /// A fixed slot for the widest reading of the unit. The hidden reference
+    /// holds its width, so 9 → 10 → 100 never moves the surrounding layout, and
+    /// the changing number only ever rolls inside it.
+    private var numberSlot: some View {
+        ZStack {
+            Text("000")
+                .font(readoutFont)
+                .monospacedDigit()
+                .tracking(-1.2)
+                .hidden()
+
+            if let displayed {
+                Text(String(displayed))
+                    .font(readoutFont)
+                    .monospacedDigit()
+                    .tracking(-1.2)
+                    .lineLimit(1)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                    .contentTransition(
+                        animates ? .numericText(value: Double(displayed)) : .identity
+                    )
+                    .animation(animates ? VELORAMotion.readout : nil, value: displayed)
+            } else {
+                Text("—")
+                    .font(.system(size: placeholderFontSize, weight: .ultraLight, design: .rounded))
+                    .foregroundStyle(AppTheme.Colors.textTertiary)
+            }
+        }
+        .frame(height: readoutSlotHeight)
     }
 
     private var statusChip: some View {

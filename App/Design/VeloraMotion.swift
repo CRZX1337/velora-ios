@@ -16,10 +16,6 @@ enum VELORAMotion {
     static let selection = Animation.smooth(duration: 0.24)
     /// Sheet and navigation chrome.
     static let sheet = Animation.smooth(duration: 0.36)
-    /// Seconds of response for the speed readout. The curve that consumes it
-    /// lives in `SpeedDisplayCurve`, which keeps the model layer free of SwiftUI.
-    static let readoutResponse = SpeedDisplayCurve.defaultResponse
-
     /// Reduce Motion substitutes a still frame instead of removing feedback:
     /// the value still changes, it just arrives without travel.
     static func resolve(_ animation: Animation, reduceMotion: Bool) -> Animation? {

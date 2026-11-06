@@ -193,7 +193,6 @@ struct SpeedEngineTests {
         testDemoSessionPhases(harness)
         testDemoPlaybackGate(harness)
         testTripControlRouting(harness)
-        testSpeedDisplayCurve(harness)
 
         print("\n\(harness.checks) checks, \(harness.failures) failures")
         if harness.failures > 0 {
@@ -1148,108 +1147,6 @@ struct SpeedEngineTests {
         }
         harness.check(unique, "50 playback restarts never reuse a token")
         harness.check(tokens.count == 50, "every playback restart has its own generation")
-    }
-
-    static func testSpeedDisplayCurve(_ harness: Harness) {
-        harness.section("Speed readout: display-only smoothing")
-
-        harness.check(SpeedDisplayCurve(target: 0).isSettled(at: 0), "a curve at rest is settled")
-
-        // Acquisition ramps up from the drawn value without passing the measurement.
-        let acquisition = SpeedDisplayCurve(target: 0, at: 100).advanced(to: 20, at: 100)
-        harness.check(acquisition.value(at: 100) == 0, "acquisition starts at the drawn value")
-
-        var rising = true
-        var overshoot = false
-        var previous = 0.0
-        for step in 1...400 {
-            let value = acquisition.value(at: 100 + Double(step) * 0.01)
-            if value < previous - 1e-6 { rising = false }
-            if value > 20 + 1e-9 { overshoot = true }
-            previous = value
-        }
-        harness.check(rising, "acquisition rises without stepping backwards")
-        harness.check(!overshoot, "acquisition never passes the measured value")
-        harness.close(
-            acquisition.value(at: 102),
-            20,
-            tolerance: 0.2,
-            "acquisition lands on the measurement"
-        )
-        harness.check(acquisition.isSettled(at: 100 + 5), "the curve settles after five responses")
-
-        // Retargeting bends the motion instead of restarting it.
-        let before = acquisition.value(at: 100.15)
-        let retargeted = acquisition.advanced(to: 42, at: 100.15)
-        harness.close(
-            retargeted.value(at: 100.15),
-            before,
-            tolerance: 1e-9,
-            "a retarget keeps the drawn value continuous"
-        )
-        harness.check(retargeted.target == 42, "a retarget adopts the new measurement")
-
-        // A repeated sample must not restart anything.
-        harness.check(
-            retargeted.advanced(to: 42, at: 100.2) == retargeted,
-            "a repeated measurement leaves the curve untouched"
-        )
-
-        // Sampling is a pure function of time, not of frame count.
-        harness.check(
-            retargeted.value(at: 100.4) == retargeted.value(at: 100.4),
-            "the curve returns the same value for the same instant"
-        )
-        harness.check(
-            retargeted.value(at: 90) == retargeted.from,
-            "a time before the curve start returns its origin"
-        )
-
-        // Guards
-        harness.check(
-            retargeted.advanced(to: -5, at: 101) == retargeted,
-            "a negative measurement is ignored"
-        )
-        harness.check(
-            retargeted.advanced(to: .nan, at: 101) == retargeted,
-            "a non-finite measurement is ignored"
-        )
-        harness.check(
-            retargeted.advanced(to: .infinity, at: 101) == retargeted,
-            "an infinite measurement is ignored"
-        )
-
-        // Stopping lands on zero and never below it.
-        let stopped = retargeted.advanced(to: 0, at: 101)
-        harness.close(stopped.value(at: 106), 0, tolerance: 1e-6, "a stop settles on zero")
-        harness.check(stopped.value(at: 101.5) >= 0, "the readout never draws a negative speed")
-        harness.check(stopped.isSettled(at: 106), "a settled curve stops redrawing")
-
-        // The measurement pipeline stays authoritative: the same fixes produce
-        // the same engine reading whether or not a curve is drawn.
-        let engine = SpeedEngine()
-        for index in 0...20 {
-            engine.ingest(Fixtures.fix(
-                id: index,
-                time: Double(index),
-                x: Double(index) * 10,
-                y: 0,
-                accuracy: 5,
-                nativeSpeed: 12,
-                nativeSpeedAccuracy: 0.3
-            ))
-        }
-        let measured = engine.reading.metersPerSecond ?? -1
-        harness.close(measured, 12, tolerance: 1e-9, "the engine keeps the measured speed")
-
-        let displayOnly = SpeedDisplayCurve(target: measured, at: 0).advanced(to: 40, at: 0)
-        harness.close(
-            engine.reading.metersPerSecond ?? -1,
-            measured,
-            tolerance: 1e-9,
-            "drawing a smoothed curve never feeds back into the measurement"
-        )
-        harness.check(displayOnly.target == 40, "the curve follows its own target")
     }
 
     static func testTripControlRouting(_ harness: Harness) {

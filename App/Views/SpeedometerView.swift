@@ -51,16 +51,15 @@ struct SpeedometerView: View {
         return reading.metersPerSecond != nil && reading.source != .unavailable
     }
 
-    /// Display-only curve for the dial. The session owns the interpolation; a
-    /// snapshot uses a steady value so a screenshot never catches a ramp.
-    private var gaugeDisplay: SpeedDisplayCurve {
-        if let snapshotSpeedMetersPerSecond {
-            return SpeedDisplayCurve(
-                target: snapshotSpeedMetersPerSecond,
-                response: VELORAMotion.readoutResponse
-            )
+    /// The measured value the dial draws, never a smoothed copy of it. A running
+    /// trip starts at 0 until the first fix arrives, so the number can roll into
+    /// the measurement instead of cutting in.
+    private var gaugeValue: Double? {
+        if let snapshotSpeedMetersPerSecond { return snapshotSpeedMetersPerSecond }
+        if let metersPerSecond = reading.metersPerSecond, reading.source != .unavailable {
+            return metersPerSecond
         }
-        return tripSession.speedDisplay
+        return tripSession.state == .idle ? nil : 0
     }
 
     private var gaugeState: GaugeState {
@@ -199,11 +198,11 @@ struct SpeedometerView: View {
 
     private func gauge(diameter: CGFloat) -> some View {
         SpeedGauge(
-            display: gaugeDisplay,
-            hasReading: hasReading,
+            value: gaugeValue,
             unit: unit,
             state: gaugeState,
-            diameter: diameter
+            diameter: diameter,
+            animationsEnabled: valueAnimationsEnabled
         )
         .padding(.top, AppTheme.Spacing.sm)
     }
