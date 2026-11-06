@@ -47,7 +47,9 @@ struct SettingsView: View {
 
                 Section {
                     Toggle("Show Movement Status", isOn: $showsMotionStatus)
+                        .tint(.green)
                     Toggle("Show GPS Status", isOn: $showsGPSStatus)
+                        .tint(.green)
                 } header: {
                     Label("Dashboard", systemImage: "rectangle.3.group")
                 } footer: {
@@ -59,6 +61,7 @@ struct SettingsView: View {
                         get: { demo.isEnabled },
                         set: { demo.setEnabled($0) }
                     ))
+                    .tint(.green)
 
                     LabeledContent("Status", value: demo.statusText)
 

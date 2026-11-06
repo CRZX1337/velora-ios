@@ -1,4 +1,3 @@
-import CoreLocation
 import Foundation
 import SwiftUI
 
@@ -393,46 +392,17 @@ struct MotionStatusCard: View {
     }
 }
 
+/// GPS state as a quiet status line. Permission is requested from the trip
+/// controls, so this card never carries a permission action of its own.
 struct GPSStatusCard: View {
     let presentation: GPSStatusPresentation
-    let authorizationStatus: CLAuthorizationStatus
-    let servicesEnabled: Bool
-    let showsPermissionAction: Bool
-    let onRequestPermission: () -> Void
-    let onOpenSettings: () -> Void
-
-    private var hasAction: Bool {
-        showsPermissionAction
-            && ((authorizationStatus == .notDetermined && servicesEnabled)
-                || authorizationStatus == .denied)
-    }
-
-    private var actionTitle: String? {
-        guard hasAction else { return nil }
-        return authorizationStatus == .denied ? "Open Settings" : "Allow Access"
-    }
-
-    private var actionHint: String? {
-        guard hasAction else { return nil }
-        return authorizationStatus == .denied
-            ? "Opens the system settings to allow location access."
-            : "Requests location access while a trip is active."
-    }
-
-    private var action: (() -> Void)? {
-        guard hasAction else { return nil }
-        return authorizationStatus == .denied ? onOpenSettings : onRequestPermission
-    }
 
     var body: some View {
         StatusCard(
             symbol: presentation.symbol,
             title: presentation.title,
             detail: presentation.subtitle,
-            tint: presentation.tint,
-            actionTitle: actionTitle,
-            actionHint: actionHint,
-            action: action
+            tint: presentation.tint
         )
     }
 }

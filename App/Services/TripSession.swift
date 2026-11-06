@@ -1,6 +1,28 @@
 import Combine
 import Foundation
 
+/// A one-shot permission explanation, shown only when the user asks for a trip.
+enum LocationPrompt: Equatable, Sendable {
+    case explain
+    case denied
+
+    var title: String {
+        switch self {
+        case .explain: "Location Access"
+        case .denied: "Location Access Is Off"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .explain:
+            "VELORA uses your location to measure speed and record your trip. Location data stays on this device."
+        case .denied:
+            "VELORA cannot measure speed without location access. You can allow it again in iOS Settings."
+        }
+    }
+}
+
 @MainActor
 final class TripSession: ObservableObject {
     static let shared = TripSession()
@@ -10,11 +32,18 @@ final class TripSession: ObservableObject {
     /// provenance; it never changes engine or recorder behaviour.
     @Published private(set) var isSimulatedSession = false
     @Published var showingSettings = false
+    /// Non-nil while the pre-flight permission explanation is on screen. The
+    /// dashboard keeps no permission card of its own.
+    @Published var locationPrompt: LocationPrompt?
     @Published private(set) var maximumSpeedMetersPerSecond: Double = 0
     @Published private(set) var distanceMeters: Double = 0
     @Published private(set) var elapsedSeconds: TimeInterval = 0
 
     @Published private(set) var speedReading: SpeedReading = .unavailable
+    /// Display-only curve behind the dial. The measurement lives in
+    /// `speedReading`; this only describes how the number travels on screen and
+    /// is never read by the engine, the recorder or the time ledger.
+    @Published private(set) var speedDisplay = SpeedDisplayCurve(target: 0)
     @Published private(set) var motionState: MotionVerdict = .stabilizing
     @Published private(set) var positionMotionStatus: MotionVerdict = .stabilizing
     @Published private(set) var segmentMotionStatus: MotionVerdict = .stabilizing
@@ -41,6 +70,10 @@ final class TripSession: ObservableObject {
     /// source supplies its simulated clock so playback rates stay consistent.
     var monotonicClock: () -> Double = { ProcessInfo.processInfo.systemUptime }
 
+    /// Wall-clock seconds for the display curve. Deliberately independent of the
+    /// trip clock, so demo playback at 5x does not animate the dial 5x faster.
+    var displayClock: () -> Double = { Date.timeIntervalSinceReferenceDate }
+
     var averageSpeedMetersPerSecond: Double {
         guard elapsedSeconds > 0 else { return 0 }
         return distanceMeters / elapsedSeconds
@@ -55,6 +88,7 @@ final class TripSession: ObservableObject {
         elapsedSeconds = 0
         engine.reset()
         recorder.start(now: monotonicNow())
+        speedDisplay = SpeedDisplayCurve(target: 0, at: displayClock())
         state = .running
         isSimulatedSession = false
         locationService.onFix = { [weak self] fix in
@@ -63,6 +97,14 @@ final class TripSession: ObservableObject {
         locationService.requestPermission()
         locationService.startUpdates()
         publish(now: monotonicNow())
+    }
+
+    /// Continue in the explanation: the trip starts now, and `start` is what asks
+    /// CoreLocation for permission, so the system prompt follows the explanation
+    /// instead of greeting the user on launch.
+    func confirmLocationPrompt(using locationService: LocationService) {
+        locationPrompt = nil
+        start(using: locationService)
     }
 
     func pause(locationService: LocationService) {
@@ -93,6 +135,7 @@ final class TripSession: ObservableObject {
         distanceMeters = 0
         elapsedSeconds = 0
         speedReading = .unavailable
+        speedDisplay = SpeedDisplayCurve(target: 0)
         motionState = .stabilizing
         positionMotionStatus = .stabilizing
         segmentMotionStatus = .stabilizing
@@ -156,11 +199,20 @@ final class TripSession: ObservableObject {
         segmentMotionStatus = snapshot.segmentStatus
 
         speedReading = engine.reading
+        updateSpeedDisplay()
         positionMotionStatus = engine.positionMotionStatus
         nativeMotionStatus = engine.nativeMotionStatus
         engineDiagnostics = engine.diagnostics
 
         fuseMotionState()
+    }
+
+    /// Presentation only: bends the drawn value toward the newest measurement.
+    private func updateSpeedDisplay() {
+        guard let metersPerSecond = speedReading.metersPerSecond,
+              metersPerSecond.isFinite
+        else { return }
+        speedDisplay = speedDisplay.advanced(to: metersPerSecond, at: displayClock())
     }
 
     /// Status fusion. Position evidence stays authoritative for segment

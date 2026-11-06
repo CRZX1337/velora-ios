@@ -51,24 +51,16 @@ struct SpeedometerView: View {
         return reading.metersPerSecond != nil && reading.source != .unavailable
     }
 
-    private var displayedSpeed: String {
+    /// Display-only curve for the dial. The session owns the interpolation; a
+    /// snapshot uses a steady value so a screenshot never catches a ramp.
+    private var gaugeDisplay: SpeedDisplayCurve {
         if let snapshotSpeedMetersPerSecond {
-            return unit.formattedSpeed(snapshotSpeedMetersPerSecond)
+            return SpeedDisplayCurve(
+                target: snapshotSpeedMetersPerSecond,
+                response: VELORAMotion.readoutResponse
+            )
         }
-        guard let metersPerSecond = reading.metersPerSecond else { return "—" }
-        return unit.formattedSpeed(metersPerSecond)
-    }
-
-    private var gaugeSpeed: Double {
-        if let snapshotSpeedMetersPerSecond {
-            return unit.speed(fromMetersPerSecond: snapshotSpeedMetersPerSecond)
-        }
-        guard let metersPerSecond = reading.metersPerSecond else { return 0 }
-        return unit.speed(fromMetersPerSecond: metersPerSecond)
-    }
-
-    private var gaugeScale: GaugeScale {
-        GaugeScale.make(for: unit)
+        return tripSession.speedDisplay
     }
 
     private var gaugeState: GaugeState {
@@ -108,6 +100,24 @@ struct SpeedometerView: View {
         dashboard
             .safeAreaBar(edge: .bottom) { tripControls }
             .modifier(TripFeedback(state: tripSession.state))
+            .alert(
+                tripSession.locationPrompt?.title ?? "",
+                isPresented: locationPromptBinding,
+                presenting: tripSession.locationPrompt
+            ) { prompt in
+                switch prompt {
+                case .explain:
+                    Button("Continue") {
+                        tripSession.confirmLocationPrompt(using: locationService)
+                    }
+                    Button("Not Now", role: .cancel) {}
+                case .denied:
+                    Button("Open Settings") { openAppSettings() }
+                    Button("Not Now", role: .cancel) {}
+                }
+            } message: { prompt in
+                Text(prompt.message)
+            }
             .sheet(isPresented: $tripSession.showingSettings) {
                 SettingsView()
                     .presentationDetents([.large])
@@ -189,14 +199,11 @@ struct SpeedometerView: View {
 
     private func gauge(diameter: CGFloat) -> some View {
         SpeedGauge(
-            speed: gaugeSpeed,
-            valueText: displayedSpeed,
-            unitTitle: unit.title,
-            unitSpokenTitle: unit.spokenTitle,
+            display: gaugeDisplay,
+            hasReading: hasReading,
+            unit: unit,
             state: gaugeState,
-            diameter: diameter,
-            scale: gaugeScale,
-            isSimulated: tripSession.isSimulatedSession
+            diameter: diameter
         )
         .padding(.top, AppTheme.Spacing.sm)
     }
@@ -205,21 +212,14 @@ struct SpeedometerView: View {
     /// LocationService, SpeedEngine, TripRecorder or the time ledger.
     @ViewBuilder
     private var statusSection: some View {
-        if showsMotionStatus || showsGPSStatus {
+        if showsMotionStatus || showsGPSCard {
             VStack(spacing: AppTheme.Spacing.sm) {
                 if showsMotionStatus {
                     MotionStatusCard(presentation: motionPresentation)
                 }
 
-                if showsGPSStatus {
-                    GPSStatusCard(
-                        presentation: gpsPresentation,
-                        authorizationStatus: locationService.authorizationStatus,
-                        servicesEnabled: locationService.servicesEnabled,
-                        showsPermissionAction: !tripSession.isSimulatedSession,
-                        onRequestPermission: { locationService.requestPermission() },
-                        onOpenSettings: openAppSettings
-                    )
+                if showsGPSCard {
+                    GPSStatusCard(presentation: gpsPresentation)
                 }
             }
             .padding(.top, AppTheme.Spacing.xs)
@@ -268,7 +268,12 @@ struct SpeedometerView: View {
             }
         case .live:
             switch action {
-            case .start: tripSession.start(using: locationService)
+            case .start:
+                if let prompt = locationPromptBeforeStart() {
+                    tripSession.locationPrompt = prompt
+                } else {
+                    tripSession.start(using: locationService)
+                }
             case .pause: tripSession.pause(locationService: locationService)
             case .resume: tripSession.resume(locationService: locationService)
             case .reset: tripSession.reset(locationService: locationService)
@@ -329,6 +334,37 @@ struct SpeedometerView: View {
         return max(
             AppTheme.Layout.minGaugeDiameter,
             min(widthLimit, heightLimit, AppTheme.Layout.maxGaugeDiameter)
+        )
+    }
+
+    // MARK: - Location permission
+
+    /// The dashboard shows no permission card, so the explanation appears only
+    /// when the user asks for a trip. iOS has decided nothing before that.
+    private var showsGPSCard: Bool {
+        guard showsGPSStatus else { return false }
+        return !(locationService.status == .permissionRequired && !tripSession.isSimulatedSession)
+    }
+
+    private func locationPromptBeforeStart() -> LocationPrompt? {
+        switch locationService.authorizationStatus {
+        case .notDetermined:
+            return locationService.servicesEnabled ? .explain : nil
+        case .denied, .restricted:
+            return .denied
+        case .authorizedWhenInUse, .authorizedAlways:
+            return nil
+        @unknown default:
+            return nil
+        }
+    }
+
+    private var locationPromptBinding: Binding<Bool> {
+        Binding(
+            get: { tripSession.locationPrompt != nil },
+            set: { isPresented in
+                if !isPresented { tripSession.locationPrompt = nil }
+            }
         )
     }
 
