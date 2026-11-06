@@ -1,0 +1,95 @@
+# Velora - native SwiftUI GPS speedometer
+#
+# Tracked: application sources, tests, build scripts, configuration templates
+# and documentation. Ignored: build output, local toolchain configuration,
+# IDE state, AI tooling state and credentials.
+#
+# Every comment stays on its own line: Git treats text after a pattern as part
+# of the pattern, which silently disables the rule.
+
+# --- Build output ---
+
+artifacts/
+Build/
+build/
+Build-*/
+.ipabuilder-build/
+build.log
+*.ipa
+
+# --- Local configuration ---
+# Machine-specific tool paths live in BuildConfig.local.ps1 only.
+
+BuildConfig.local.ps1
+
+# --- Test harness output ---
+
+Tests/bin/
+Tests/build.log
+
+# --- AI tooling state ---
+
+.freebuff/
+.agents/
+skills-lock.json
+.opencode/
+
+# --- Swift / SwiftPM / Apple caches ---
+
+.build/
+.swiftpm/
+DerivedData/
+*.xcarchive
+*.dSYM
+*.app
+*.appex
+*.xcuserstate
+xcuserdata/
+.DS_Store
+
+# --- Windows ---
+
+Thumbs.db
+Desktop.ini
+*.lnk
+
+# --- Editors and IDEs ---
+
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/extensions.json
+*.swp
+*~
+
+# --- Logs and temporary files ---
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.cache
+*.orig
+*.rej
+
+# --- Secrets and signing material ---
+
+.env
+.env.*
+!.env.example
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
+*.csr
+*.keystore
+*.jks
+*.asc
+*.mobileprovision
+*.provisionprofile
+secrets/
+*.secret

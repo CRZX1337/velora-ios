@@ -1,0 +1,218 @@
+name: Beta release
+
+# Builds the IPA natively on the GitHub-hosted macOS image (Xcode 27.2 /
+# iPhoneOS 27.2) and publishes the result as the rolling `beta-latest`
+# pre-release from Ubuntu. No self-hosted runner is involved.
+#
+# The local Windows build stays independent: scripts/build-ipa.ps1 and
+# WindowsIPABuilder are untouched and never run here.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# No workflow-level concurrency group: the publish job serializes releases on
+# its own group and the beta-run marker in the release body stops older builds
+# from replacing newer ones. A workflow-level group wedged the queue instead -
+# runs sat in `pending` without ever creating a job.
+
+jobs:
+  build-ipa:
+    name: Build IPA (hosted macOS, Xcode 27.2)
+    runs-on: xcode-27
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 27.2 and verify the toolchain
+        run: |
+          set -euo pipefail
+
+          developer_dir=/Applications/Xcode_27.2.app
+          if [ ! -d "$developer_dir" ]; then
+            echo '::error::Xcode 27.2 is not installed on this image'
+            ls -1 /Applications
+            exit 1
+          fi
+
+          sudo xcode-select -s "$developer_dir"
+
+          xcodebuild -version
+          xcode_version="$(xcodebuild -version | head -n 1)"
+          if [ "$xcode_version" != 'Xcode 27.2' ]; then
+            echo "::error::expected Xcode 27.2, found $xcode_version"
+            exit 1
+          fi
+
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          xcrun --sdk iphoneos --show-sdk-path
+          if [ "$sdk_version" != '27.2' ]; then
+            echo "::error::expected iPhoneOS 27.2, found $sdk_version"
+            exit 1
+          fi
+
+          swift --version
+          xcrun swiftc --version
+          xcodebuild -showsdks
+
+          for tool in zip ditto codesign plutil xcrun; do
+            printf '%s: ' "$tool"
+            command -v "$tool" || { echo '::error::missing packaging tool'; exit 1; }
+          done
+
+      - name: Run Foundation tests
+        run: |
+          set -euo pipefail
+          output="$(bash ./scripts/run-tests.sh 2>&1)"
+          status=$?
+          printf '%s\n' "$output"
+          [ "$status" -eq 0 ] || { echo "::error::Foundation tests exited with code $status"; exit "$status"; }
+
+          if [[ "$output" =~ ([0-9]+)\ checks,\ ([0-9]+)\ failures ]]; then
+            checks="${BASH_REMATCH[1]}"
+            failures="${BASH_REMATCH[2]}"
+          else
+            echo '::error::The test runner did not print a summary line'
+            exit 1
+          fi
+          echo "::notice title=Foundation tests::$checks checks, $failures failures"
+          [ "$failures" -eq 0 ] || { echo "::error::$failures failing checks"; exit 1; }
+
+      - name: Build with xcodebuild
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Velora.xcodeproj \
+            -target Speedometer \
+            -configuration Release \
+            -sdk iphoneos \
+            CONFIGURATION_BUILD_DIR="$PWD/build/Release-iphoneos" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: bash ./scripts/package-ipa.sh build/Release-iphoneos/Speedometer.app artifacts/Velora.ipa
+
+      - name: Verify IPA
+        run: python3 ./scripts/verify-ipa.py artifacts/Velora.ipa
+
+      - name: Report package summary
+        run: |
+          set -euo pipefail
+          size=$(wc -c <artifacts/Velora.ipa | tr -d ' ')
+          digest=$(shasum -a 256 artifacts/Velora.ipa | awk '{print $1}')
+          {
+            echo '### Velora beta IPA'
+            echo
+            echo "- Size: $size bytes"
+            echo "- SHA-256: \`$digest\`"
+            echo '- Bundle: `com.velora.app` / Velora / iOS 26.0 / Speedometer'
+            echo '- Privacy manifest: `Payload/Speedometer.app/PrivacyInfo.xcprivacy`'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: velora-ipa
+          path: artifacts/Velora.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-beta:
+    name: Publish beta-latest pre-release
+    needs: build-ipa
+    if: ${{ needs.build-ipa.result == 'success' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: beta-publish
+      cancel-in-progress: false
+
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+
+    steps:
+      - name: Download IPA artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: velora-ipa
+          path: dist
+
+      - name: Publish rolling pre-release
+        run: |
+          set -euo pipefail
+
+          source=$(find dist -type f -name '*.ipa' -print -quit)
+          test -n "$source" || { echo '::error::No IPA in the build artifact'; exit 1; }
+          asset=Velora-beta-latest.ipa
+          cp "$source" "$asset"
+          test -s "$asset"
+
+          short_sha=${GITHUB_SHA:0:7}
+          title="Velora Beta - $short_sha"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          notes=$(printf 'Automated beta build from `main`.\n\n- Commit: `%s`\n- Workflow run: [#%s](%s)\n- Asset: `%s`\n\n<!-- beta-run:%s -->' \
+            "$short_sha" "$GITHUB_RUN_NUMBER" "$run_url" "$asset" "$GITHUB_RUN_NUMBER")
+
+          # Older runs must never replace a newer beta: the last published run
+          # number is recorded in a hidden marker inside the release body.
+          published_run=0
+          if gh release view beta-latest >/dev/null 2>&1; then
+            body=$(gh release view beta-latest --json body --jq .body)
+            published_run=$(printf '%s' "$body" | sed -n 's/.*beta-run:\([0-9][0-9]*\).*/\1/p' | head -n 1)
+            published_run=${published_run:-0}
+          fi
+          if [ "$published_run" -ge "$GITHUB_RUN_NUMBER" ]; then
+            echo "beta-latest already carries run $published_run; leaving it in place for older run $GITHUB_RUN_NUMBER."
+            exit 0
+          fi
+
+          if gh release view beta-latest >/dev/null 2>&1; then
+            # Updating notes does not move the release target. Point it at the
+            # published commit as well, so the release metadata cannot keep an
+            # older commit while the tag and asset already name the new build.
+            gh release edit beta-latest --title "$title" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          else
+            gh release create beta-latest --title "$title" --notes "$notes" --prerelease --target "$GITHUB_SHA"
+          fi
+          gh release upload beta-latest "$asset" --clobber
+
+          # A release is bound to the tag *name*, so publishing new code does not
+          # move the tag. Point the tag at the published commit explicitly, or
+          # `beta-latest` keeps resolving to whichever commit created it first.
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/beta-latest" --jq .object.sha 2>/dev/null || true)
+          if [ -z "$tag_sha" ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref='refs/tags/beta-latest' -f sha="$GITHUB_SHA" >/dev/null
+          elif [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/beta-latest" \
+              -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          fi
+
+          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/beta-latest" --jq .object.sha)
+          if [ "$tag_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::beta-latest points at $tag_sha, expected $GITHUB_SHA"
+            exit 1
+          fi
+
+          target_sha=$(gh release view beta-latest --json targetCommitish --jq .targetCommitish)
+          if [ "$target_sha" != "$GITHUB_SHA" ]; then
+            echo "::error::beta-latest release targets $target_sha, expected $GITHUB_SHA"
+            exit 1
+          fi
+
+          gh release view beta-latest --json url,isPrerelease,assets \
+            --jq '"release: \(.url) prerelease=\(.isPrerelease)", (.assets[] | "asset: \(.name) \(.size) bytes")'
+          echo "::notice title=beta-latest::$tag_sha"
+          echo "tag: beta-latest -> $tag_sha"

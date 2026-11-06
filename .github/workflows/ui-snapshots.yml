@@ -1,0 +1,128 @@
+name: UI snapshots
+
+# Manual, additive verification only. Builds the app for the iOS Simulator and
+# captures the dashboard, settings and diagnostics in both appearances and at
+# accessibility text sizes. It never builds, signs or publishes the IPA;
+# beta-release.yml stays untouched.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard-snapshots:
+    name: Dashboard snapshots (simulator)
+    runs-on: xcode-27
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 27.2 and list simulator runtimes
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Build for the simulator
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Velora.xcodeproj \
+            -target Speedometer \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            ONLY_ACTIVE_ARCH=YES \
+            CONFIGURATION_BUILD_DIR="$PWD/build/Simulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Capture UI snapshots
+        run: |
+          set -euo pipefail
+
+          runtime="$(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["runtimes"]
+          for runtime in runtimes:
+              if runtime.get("isAvailable") and runtime["name"].startswith("iOS"):
+                  print(runtime["identifier"])
+                  break
+          else:
+              raise SystemExit("no available iOS runtime")
+          ')"
+
+          devicetype="$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys
+          types = [d for d in json.load(sys.stdin)["devicetypes"] if d["name"].startswith("iPhone")]
+          for preferred in ("iPhone 17 Pro", "iPhone 17", "iPhone 16 Pro"):
+              for device in types:
+                  if device["name"] == preferred:
+                      print(device["identifier"])
+                      raise SystemExit(0)
+          if not types:
+              raise SystemExit("no iPhone device type")
+          print(types[0]["identifier"])
+          ')"
+
+          udid="$(xcrun simctl create "Velora Snapshots" "$devicetype" "$runtime")"
+          echo "device: $udid ($devicetype / $runtime)"
+          trap 'xcrun simctl delete "$udid" || true' EXIT
+
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl list devices booted
+          xcrun simctl status_bar "$udid" override \
+            --time "9:41" --batteryState charged --batteryLevel 100 \
+            --wifiBars 3 --cellularBars 4
+          xcrun simctl install "$udid" build/Simulator/Speedometer.app
+          mkdir -p artifacts/snapshots
+
+          shot() {
+            local name="$1" appearance="$2" size="$3"
+            shift 3
+            xcrun simctl ui "$udid" appearance "$appearance"
+            xcrun simctl ui "$udid" content_size "$size"
+            xcrun simctl terminate "$udid" com.velora.app >/dev/null 2>&1 || true
+            xcrun simctl launch "$udid" com.velora.app "$@" >/dev/null
+            sleep "${SNAPSHOT_DELAY:-5}"
+            xcrun simctl io "$udid" screenshot --display=internal "artifacts/snapshots/$name.png"
+          }
+
+          shot dashboard-light light medium
+          shot dashboard-dark dark medium
+          shot settings-light light medium -velora-snapshot-settings
+          shot settings-dark dark medium -velora-snapshot-settings
+          shot diagnostics-light light medium -velora-snapshot-diagnostics
+          shot diagnostics-dark dark medium -velora-snapshot-diagnostics
+          shot dashboard-ax-light light accessibility-extra-extra-extra-large
+          shot dashboard-ax-dark dark accessibility-extra-extra-extra-large
+          shot demo-controls-light light medium -velora-snapshot-demo
+          shot demo-controls-dark dark medium -velora-snapshot-demo
+          SNAPSHOT_DELAY=12 shot dashboard-demo-light light medium -velora-snapshot-demo-live
+          SNAPSHOT_DELAY=12 shot dashboard-demo-dark dark medium -velora-snapshot-demo-live
+          SNAPSHOT_DELAY=8 shot dashboard-demo-paused-light light medium -velora-snapshot-demo-live -velora-snapshot-demo-paused
+          SNAPSHOT_DELAY=8 shot dashboard-demo-paused-dark dark medium -velora-snapshot-demo-live -velora-snapshot-demo-paused
+          SNAPSHOT_DELAY=8 shot dashboard-demo-resumed-light light medium -velora-snapshot-demo-live -velora-snapshot-demo-resumed
+          SNAPSHOT_DELAY=8 shot dashboard-demo-resumed-dark dark medium -velora-snapshot-demo-live -velora-snapshot-demo-resumed
+
+          for speed in 0 50 130 200 320; do
+            shot "gauge-${speed}-light" light medium -velora-snapshot-speed "$speed"
+            shot "gauge-${speed}-dark" dark medium -velora-snapshot-speed "$speed"
+          done
+
+          ls -l artifacts/snapshots
+
+      - name: Upload snapshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: velora-dashboard-snapshots
+          path: artifacts/snapshots
+          if-no-files-found: error
+          retention-days: 14

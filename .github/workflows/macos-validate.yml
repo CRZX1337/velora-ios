@@ -1,0 +1,113 @@
+name: macOS build validation
+
+# Manual-only proof that the app builds natively on the GitHub-hosted macOS
+# image with Xcode 27.2 / iPhoneOS 27.2. It never touches the beta release:
+# the artifact is the only output.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Build IPA (hosted macOS, Xcode 27.2)
+    runs-on: xcode-27
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 27.2 and verify the toolchain
+        run: |
+          set -euo pipefail
+
+          developer_dir=/Applications/Xcode_27.2.app
+          if [ ! -d "$developer_dir" ]; then
+            echo '::error::Xcode 27.2 is not installed on this image'
+            ls -1 /Applications
+            exit 1
+          fi
+
+          sudo xcode-select -s "$developer_dir"
+
+          echo '--- xcodebuild -version ---'
+          xcodebuild -version
+          xcode_version="$(xcodebuild -version | head -n 1)"
+          if [ "$xcode_version" != 'Xcode 27.2' ]; then
+            echo "::error::expected Xcode 27.2, found $xcode_version"
+            exit 1
+          fi
+
+          echo '--- iphoneos SDK ---'
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "iPhoneOS SDK: $sdk_version"
+          xcrun --sdk iphoneos --show-sdk-path
+          if [ "$sdk_version" != '27.2' ]; then
+            echo "::error::expected iPhoneOS 27.2, found $sdk_version"
+            exit 1
+          fi
+
+          echo '--- Swift ---'
+          swift --version
+          xcrun swiftc --version
+
+          echo '--- available SDKs ---'
+          xcodebuild -showsdks
+
+          echo '--- packaging tools ---'
+          for tool in zip ditto codesign plutil xcrun; do
+            printf '%s: ' "$tool"
+            command -v "$tool" || { echo '::error::missing'; exit 1; }
+          done
+
+      - name: Run Foundation tests
+        run: bash ./scripts/run-tests.sh
+
+      - name: Build with xcodebuild
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project Velora.xcodeproj \
+            -target Speedometer \
+            -configuration Release \
+            -sdk iphoneos \
+            CONFIGURATION_BUILD_DIR="$PWD/build/Release-iphoneos" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package IPA
+        run: bash ./scripts/package-ipa.sh build/Release-iphoneos/Speedometer.app artifacts/Velora.ipa
+
+      - name: Verify IPA
+        run: python3 ./scripts/verify-ipa.py artifacts/Velora.ipa
+
+      - name: Report summary
+        run: |
+          set -euo pipefail
+          size=$(wc -c <artifacts/Velora.ipa | tr -d ' ')
+          digest=$(shasum -a 256 artifacts/Velora.ipa | awk '{print $1}')
+          {
+            echo '### Velora IPA (hosted macOS, Xcode 27.2)'
+            echo
+            echo "- Size: $size bytes"
+            echo "- SHA-256: \`$digest\`"
+            echo '- Bundle: `com.velora.app` / Velora / iOS 26.0 / Speedometer'
+            echo '- Privacy manifest: packaged and identical to the source'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: velora-ipa-macos
+          path: artifacts/Velora.ipa
+          if-no-files-found: error
+          retention-days: 14

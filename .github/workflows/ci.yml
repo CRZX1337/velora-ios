@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  foundation-tests:
+    name: Foundation tests (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    env:
+      SWIFT_VERSION: 6.4.2
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Install Swift ${{ env.SWIFT_VERSION }}
+        run: |
+          set -euo pipefail
+          version="$SWIFT_VERSION"
+          distro="$(. /etc/os-release && echo "$VERSION_ID")"
+          archive=""
+
+          # Swift names its Linux builds after the distribution version, e.g.
+          # ubuntu2404/swift-6.4.2-RELEASE-ubuntu24.04.tar.gz. Try the runner's
+          # release first, then the two most recent long-term releases.
+          for candidate in "$distro" 24.04 22.04; do
+            directory="ubuntu${candidate//./}"
+            file="swift-${version}-RELEASE-ubuntu${candidate}.tar.gz"
+            url="https://download.swift.org/swift-${version}-release/${directory}/swift-${version}-RELEASE/${file}"
+            echo "Trying $url"
+            if curl -fsSL --retry 2 --retry-delay 5 -o "/tmp/${file}" "$url"; then
+              archive="/tmp/${file}"
+              break
+            fi
+            echo "  no build for ubuntu${candidate}"
+          done
+
+          if [ -z "$archive" ]; then
+            echo "::error::Swift ${version} has no Linux build for this runner"
+            exit 1
+          fi
+
+          sudo mkdir -p /opt/swift
+          sudo tar -xzf "$archive" -C /opt/swift --strip-components=1
+          rm -f "$archive"
+          echo "/opt/swift/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain and Foundation
+        run: |
+          set -euo pipefail
+          swift --version
+          swiftc --version
+          swiftc -print-target-info
+
+          # A minimal Foundation program proves the standard library, the
+          # Foundation modules and the linker all work before the suite runs.
+          mkdir -p /tmp/swift-probe
+          cat > /tmp/swift-probe/main.swift <<'SWIFT'
+          import Foundation
+
+          let uptime = ProcessInfo.processInfo.systemUptime
+          let defaults = UserDefaults.standard.string(forKey: "velora.probe") ?? "none"
+          print("Foundation probe: uptime \(uptime > 0), defaults \(defaults)")
+          SWIFT
+          swiftc -o /tmp/swift-probe/probe /tmp/swift-probe/main.swift
+          /tmp/swift-probe/probe
+
+      - name: Validate privacy manifest
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import plistlib
+          import sys
+
+          path = "App/Resources/PrivacyInfo.xcprivacy"
+          with open(path, "rb") as handle:
+              manifest = plistlib.load(handle)
+
+          declared = {
+              entry["NSPrivacyAccessedAPIType"]: entry["NSPrivacyAccessedAPITypeReasons"]
+              for entry in manifest["NSPrivacyAccessedAPITypes"]
+          }
+          expected = {
+              "NSPrivacyAccessedAPICategorySystemBootTime": ["35F9.1"],
+              "NSPrivacyAccessedAPICategoryUserDefaults": ["CA92.1"],
+          }
+
+          problems = []
+          if declared != expected:
+              problems.append(f"unexpected required-reason APIs: {declared}")
+          if manifest["NSPrivacyTracking"] is not False:
+              problems.append("NSPrivacyTracking must be false")
+          if manifest["NSPrivacyTrackingDomains"] != []:
+              problems.append("NSPrivacyTrackingDomains must be empty")
+          if manifest["NSPrivacyCollectedDataTypes"] != []:
+              problems.append("NSPrivacyCollectedDataTypes must be empty")
+
+          print(f"{path}: {len(declared)} required-reason API categories declared")
+          for problem in problems:
+              print(f"::error::{problem}")
+          sys.exit(1 if problems else 0)
+          PY
+
+      - name: Run Foundation test suite
+        run: bash ./scripts/run-tests.sh
