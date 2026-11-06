@@ -21,6 +21,7 @@ struct SpeedometerView: View {
     private let snapshotStartsDemo = ProcessInfo.processInfo.arguments.contains("-velora-snapshot-demo-live")
     private let snapshotPausesDemo = ProcessInfo.processInfo.arguments.contains("-velora-snapshot-demo-paused")
     private let snapshotResumesDemo = ProcessInfo.processInfo.arguments.contains("-velora-snapshot-demo-resumed")
+    private let snapshotRollsDemo = ProcessInfo.processInfo.arguments.contains("-velora-snapshot-demo-roll")
     #endif
 
     private var unit: SpeedUnit {
@@ -89,10 +90,12 @@ struct SpeedometerView: View {
         )
     }
 
-    /// Demo playback feeds samples many times per second; its numeric roll is
-    /// skipped so the digits settle instead of animating continuously.
+    /// Demo playback feeds samples many times per second; above the readable
+    /// rates its numeric roll is skipped so the digits settle instead of
+    /// animating continuously. At 1x and 2x it rolls exactly like a live trip.
     private var valueAnimationsEnabled: Bool {
-        !reduceMotion && !tripSession.isSimulatedSession
+        guard !reduceMotion else { return false }
+        return !tripSession.isSimulatedSession || demo.rate <= 2
     }
 
     var body: some View {
@@ -300,6 +303,12 @@ struct SpeedometerView: View {
         if snapshotOpensSettings { tripSession.showingSettings = true }
         if snapshotOpensDemo {
             demo.enableForSnapshot()
+        }
+        if snapshotRollsDemo {
+            demo.enableForSnapshot()
+            demo.setRate(1)
+            demo.start()
+            return
         }
         guard snapshotStartsDemo else { return }
 

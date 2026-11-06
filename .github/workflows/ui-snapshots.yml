@@ -126,3 +126,85 @@ jobs:
           path: artifacts/snapshots
           if-no-files-found: error
           retention-days: 14
+
+  readout-motion:
+    name: Readout motion (simulator video)
+    runs-on: xcode-27
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode 27.2
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          xcodebuild -version
+
+      - name: Build for the simulator
+        run: |
+          set -euo pipefail
+          xcodebuild             -project Velora.xcodeproj             -target Speedometer             -configuration Debug             -sdk iphonesimulator             ONLY_ACTIVE_ARCH=YES             CONFIGURATION_BUILD_DIR="$PWD/build/Simulator"             CODE_SIGNING_ALLOWED=NO             build
+
+      - name: Record the readouts
+        run: |
+          set -euo pipefail
+
+          runtime="$(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["runtimes"]
+          for runtime in runtimes:
+              if runtime.get("isAvailable") and runtime["name"].startswith("iOS"):
+                  print(runtime["identifier"])
+                  break
+          else:
+              raise SystemExit("no available iOS runtime")
+          ')"
+
+          devicetype="$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys
+          types = [d for d in json.load(sys.stdin)["devicetypes"] if d["name"].startswith("iPhone")]
+          for preferred in ("iPhone 17 Pro", "iPhone 17", "iPhone 16 Pro"):
+              for device in types:
+                  if device["name"] == preferred:
+                      print(device["identifier"])
+                      raise SystemExit(0)
+          if not types:
+              raise SystemExit("no iPhone device type")
+          print(types[0]["identifier"])
+          ')"
+
+          udid="$(xcrun simctl create "Velora Motion" "$devicetype" "$runtime")"
+          echo "device: $udid"
+          trap 'xcrun simctl delete "$udid" || true' EXIT
+
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl status_bar "$udid" override             --time "9:41" --batteryState charged --batteryLevel 100             --wifiBars 3 --cellularBars 4
+          xcrun simctl install "$udid" build/Simulator/Speedometer.app
+
+          mkdir -p artifacts/video
+          # Demo playback at 1x: one fix per second, so both readouts change at
+          # a readable, deterministic pace while the recording runs.
+          xcrun simctl launch "$udid" com.velora.app -velora-snapshot-demo-roll >/dev/null
+          sleep 4
+
+          xcrun simctl io "$udid" recordVideo --codec=h264 artifacts/video/readout-motion.mp4 &
+          recorder=$!
+          sleep 16
+          kill -INT "$recorder" || true
+          wait "$recorder" || true
+
+          ls -l artifacts/video
+          test -s artifacts/video/readout-motion.mp4
+
+      - name: Upload video
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: velora-readout-video
+          path: artifacts/video
+          if-no-files-found: error
+          retention-days: 14
