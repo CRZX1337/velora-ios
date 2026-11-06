@@ -15,6 +15,7 @@ fi
 
 sources=(
     "$root/App/Design/AccessibilityText.swift"
+    "$root/App/Design/NumericDisplay.swift"
     "$root/App/Models/SpeedUnit.swift"
     "$root/App/Services/GPSStatus.swift"
     "$root/App/Services/Engine/MotionMath.swift"

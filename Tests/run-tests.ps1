@@ -22,6 +22,7 @@ if ([string]::IsNullOrWhiteSpace($Swiftc)) {
 
 $sources = @(
     (Join-Path $root 'App\Design\AccessibilityText.swift'),
+    (Join-Path $root 'App\Design\NumericDisplay.swift'),
     (Join-Path $root 'App\Models\SpeedUnit.swift'),
     (Join-Path $root 'App\Services\GPSStatus.swift'),
     (Join-Path $root 'App\Services\Engine\MotionMath.swift'),

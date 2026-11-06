@@ -409,6 +409,10 @@ struct GPSStatusCard: View {
 
 struct MetricCard: View {
     let title: String
+    /// The number the roll is keyed on, in display units and at the precision
+    /// `value` shows, so the animation is armed by a measurement rather than by
+    /// a formatted string.
+    let numericValue: Double
     let value: String
     let unit: String
     let symbol: String
@@ -442,14 +446,14 @@ struct MetricCard: View {
                         .foregroundStyle(AppTheme.Colors.textSecondary)
                 }
 
-                Text(value)
-                    .font(AppTheme.Typography.metricValue)
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.72)
-                    .lineLimit(1)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                    .contentTransition(animationsEnabled ? .numericText() : .identity)
-                    .animation(animationsEnabled ? VELORAMotion.readout : nil, value: value)
+                NumericReadout(
+                    value: numericValue,
+                    text: value,
+                    font: AppTheme.Typography.metricValue,
+                    animationsEnabled: animationsEnabled,
+                    minimumScaleFactor: 0.72
+                )
+                .foregroundStyle(AppTheme.Colors.textPrimary)
 
                 if !unit.isEmpty, !stacksUnit {
                     Text(unit)
@@ -497,6 +501,10 @@ struct MetricGrid: View {
         LazyVGrid(columns: columns, spacing: AppTheme.Spacing.sm) {
             MetricCard(
                 title: "MAX",
+                numericValue: NumericDisplay.anchor(
+                    unit.speed(fromMetersPerSecond: maximumSpeedMetersPerSecond),
+                    fractionDigits: 0
+                ),
                 value: unit.formattedSpeed(maximumSpeedMetersPerSecond),
                 unit: unit.title,
                 symbol: "arrow.up.right",
@@ -505,6 +513,10 @@ struct MetricGrid: View {
 
             MetricCard(
                 title: "AVERAGE",
+                numericValue: NumericDisplay.anchor(
+                    unit.speed(fromMetersPerSecond: averageSpeedMetersPerSecond),
+                    fractionDigits: 0
+                ),
                 value: unit.formattedSpeed(averageSpeedMetersPerSecond),
                 unit: unit.title,
                 symbol: "waveform.path",
@@ -514,6 +526,10 @@ struct MetricGrid: View {
 
             MetricCard(
                 title: "DISTANCE",
+                numericValue: NumericDisplay.anchor(
+                    unit.distance(fromMeters: distanceMeters),
+                    fractionDigits: 2
+                ),
                 value: unit.formattedDistance(distanceMeters),
                 unit: unit.distanceTitle,
                 symbol: "point.bottomleft.forward.to.point.topright.scurvepath",
@@ -522,17 +538,15 @@ struct MetricGrid: View {
 
             MetricCard(
                 title: "TRIP TIME",
-                value: formattedDuration,
+                // Whole seconds: one text change per second, and therefore
+                // exactly one roll per second.
+                numericValue: Double(max(0, Int(elapsedSeconds))),
+                value: NumericDisplay.duration(seconds: elapsedSeconds),
                 unit: "",
                 symbol: "clock",
                 animationsEnabled: animationsEnabled
             )
         }
-    }
-
-    private var formattedDuration: String {
-        let seconds = max(0, Int(elapsedSeconds))
-        return String(format: "%02d:%02d:%02d", seconds / 3_600, (seconds / 60) % 60, seconds % 60)
     }
 }
 

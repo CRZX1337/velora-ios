@@ -280,22 +280,24 @@ struct SpeedGauge: View {
                 .tracking(-1.2)
                 .hidden()
 
-            if let displayed {
-                Text(String(displayed))
-                    .font(readoutFont)
-                    .monospacedDigit()
-                    .tracking(-1.2)
-                    .lineLimit(1)
-                    .foregroundStyle(AppTheme.Colors.textPrimary)
-                    .contentTransition(
-                        animates ? .numericText(value: Double(displayed)) : .identity
-                    )
-                    .animation(animates ? VELORAMotion.readout : nil, value: displayed)
-            } else {
-                Text("—")
-                    .font(.system(size: placeholderFontSize, weight: .ultraLight, design: .rounded))
-                    .foregroundStyle(AppTheme.Colors.textTertiary)
-            }
+            // One readout, always present: the roll never lives inside an `if`,
+            // so no branch swap can reset it. Before the first fix the text is
+            // empty and the placeholder takes over, at zero — exactly where the
+            // first measurement rolls from.
+            NumericReadout(
+                value: Double(displayed ?? 0),
+                text: displayed.map(String.init) ?? "",
+                font: readoutFont,
+                tracking: -1.2,
+                animationsEnabled: animates
+            )
+            .foregroundStyle(AppTheme.Colors.textPrimary)
+            .opacity(displayed == nil ? 0 : 1)
+
+            Text("—")
+                .font(.system(size: placeholderFontSize, weight: .ultraLight, design: .rounded))
+                .foregroundStyle(AppTheme.Colors.textTertiary)
+                .opacity(displayed == nil ? 1 : 0)
         }
         .frame(height: readoutSlotHeight)
     }

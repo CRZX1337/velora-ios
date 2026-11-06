@@ -192,6 +192,7 @@ struct SpeedEngineTests {
         testDemoSessionSeparation(harness)
         testDemoSessionPhases(harness)
         testDemoPlaybackGate(harness)
+        testNumericDisplay(harness)
         testTripControlRouting(harness)
 
         print("\n\(harness.checks) checks, \(harness.failures) failures")
@@ -1147,6 +1148,85 @@ struct SpeedEngineTests {
         }
         harness.check(unique, "50 playback restarts never reuse a token")
         harness.check(tokens.count == 50, "every playback restart has its own generation")
+    }
+
+    static func testNumericDisplay(_ harness: Harness) {
+        harness.section("Numeric readouts: duration and anchors")
+
+        harness.check(NumericDisplay.duration(seconds: 0) == "00:00:00", "a fresh trip reads zero")
+        harness.check(NumericDisplay.duration(seconds: 59) == "00:00:59", "the last second of a minute")
+        harness.check(NumericDisplay.duration(seconds: 3_600) == "01:00:00", "an hour rolls into the hour field")
+        harness.check(
+            NumericDisplay.duration(seconds: 3_661.9) == "01:01:01",
+            "sub-second time is truncated, never rounded up"
+        )
+
+        // Every whole second has to be exactly one text change. That is what
+        // arms exactly one roll per second, however often the measurement
+        // publishes in between.
+        var everySecondDiffers = true
+        var everySecondMatches = true
+        var previous = NumericDisplay.duration(seconds: 0)
+        for second in 1...600 {
+            let text = NumericDisplay.duration(seconds: TimeInterval(second))
+            everySecondDiffers = everySecondDiffers && text != previous
+            let expected = String(
+                format: "%02d:%02d:%02d",
+                second / 3_600,
+                (second / 60) % 60,
+                second % 60
+            )
+            everySecondMatches = everySecondMatches && text == expected
+            previous = text
+        }
+        harness.check(everySecondDiffers, "every single second changes the duration text")
+        harness.check(everySecondMatches, "each second matches HH:MM:SS")
+
+        // Publishes inside one second must not re-arm the roll.
+        var stableWithinSecond = true
+        for fraction in stride(from: 0.0, to: 1.0, by: 0.05) {
+            stableWithinSecond = stableWithinSecond
+                && NumericDisplay.duration(seconds: 7 + fraction) == "00:00:07"
+        }
+        harness.check(stableWithinSecond, "sub-second publishes leave the text untouched")
+
+        // The anchor moves exactly when the printed value moves: the roll is
+        // armed once per visible change and never in between.
+        var anchorMatchesText = true
+        var anchorTracksText = true
+        for step in 0...960 {
+            let kilometersPerHour = Double(step) / 3
+            let text = SpeedUnit.kilometersPerHour.formattedSpeed(kilometersPerHour / 3.6)
+            let anchor = NumericDisplay.anchor(kilometersPerHour, fractionDigits: 0)
+            anchorMatchesText = anchorMatchesText && text == String(Int(anchor))
+
+            if step > 0 {
+                let previousKPH = Double(step - 1) / 3
+                let previousText = SpeedUnit.kilometersPerHour.formattedSpeed(previousKPH / 3.6)
+                let previousAnchor = NumericDisplay.anchor(previousKPH, fractionDigits: 0)
+                anchorTracksText = anchorTracksText
+                    && ((text != previousText) == (anchor != previousAnchor))
+            }
+        }
+        harness.check(anchorMatchesText, "a whole-unit anchor prints the same number")
+        harness.check(anchorTracksText, "the anchor moves exactly when the speed text moves")
+
+        harness.check(
+            NumericDisplay.anchor(1.234, fractionDigits: 2) == 1.23,
+            "a distance anchor keeps the printed precision"
+        )
+        harness.check(
+            NumericDisplay.anchor(.infinity, fractionDigits: 2) == 0,
+            "a non-finite value anchors at zero"
+        )
+        harness.check(
+            NumericDisplay.anchor(-5, fractionDigits: 0) == 0,
+            "a negative value anchors at zero"
+        )
+        harness.check(
+            NumericDisplay.anchor(321.4, fractionDigits: 0) == 321,
+            "an out-of-scale anchor still rounds normally"
+        )
     }
 
     static func testTripControlRouting(_ harness: Harness) {
