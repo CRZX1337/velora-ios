@@ -186,7 +186,16 @@ jobs:
           xcrun simctl status_bar "$udid" override             --time "9:41" --batteryState charged --batteryLevel 100             --wifiBars 3 --cellularBars 4
           xcrun simctl install "$udid" build/Simulator/Speedometer.app
 
-          mkdir -p artifacts/video
+          mkdir -p artifacts/video artifacts/frames
+
+          echo "--- simctl io support ---"
+          xcrun simctl help io 2>&1 | head -40 || true
+
+          # recordVideo renders the simulator display, which needs the
+          # Simulator UI in some runner images.
+          open -a Simulator --args -CurrentDeviceUDID "$udid" || true
+          sleep 5
+
           # Demo playback at 1x: one fix per second, so both readouts change at
           # a readable, deterministic pace while the recording runs.
           xcrun simctl launch "$udid" com.velora.app -velora-snapshot-demo-roll >/dev/null
@@ -195,7 +204,17 @@ jobs:
           xcrun simctl io "$udid" recordVideo --codec=h264 artifacts/video/readout-motion.mp4             >artifacts/video/recorder.log 2>&1 &
           recorder=$!
           echo "recorder pid $recorder"
-          sleep 16
+
+          # Independent fallback: a screenshot burst, so the run still yields
+          # frame evidence where the recorder is unavailable.
+          shots=0
+          deadline=$((SECONDS + 45))
+          while [ $SECONDS -lt $deadline ]; do
+            shots=$((shots + 1))
+            xcrun simctl io "$udid" screenshot               "artifacts/frames/frame-$(printf %04d "$shots").png" >/dev/null 2>&1 || break
+          done
+          echo "burst frames: $shots"
+
           kill -INT "$recorder" 2>/dev/null || true
           for _ in $(seq 1 15); do
             kill -0 "$recorder" 2>/dev/null || break
@@ -203,15 +222,31 @@ jobs:
           done
           kill -9 "$recorder" 2>/dev/null || true
           wait "$recorder" 2>/dev/null || true
+          echo "--- recorder log ---"
           cat artifacts/video/recorder.log || true
 
+          for f in artifacts/frames/*.png; do
+            [ -e "$f" ] || continue
+            sips -Z 420 -s format jpeg "$f" --out "${f%.png}.jpg" >/dev/null 2>&1 || true
+            rm -f "$f"
+          done
+
           ls -l artifacts/video
-          test -s artifacts/video/readout-motion.mp4
+          du -sh artifacts/frames || true
+          test -s artifacts/video/readout-motion.mp4 || echo "video empty; burst frames only"
 
       - name: Upload video
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: velora-readout-video
           path: artifacts/video
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload frames
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: velora-readout-frames
+          path: artifacts/frames
           if-no-files-found: error
           retention-days: 14
