@@ -192,11 +192,18 @@ jobs:
           xcrun simctl launch "$udid" com.velora.app -velora-snapshot-demo-roll >/dev/null
           sleep 4
 
-          xcrun simctl io "$udid" recordVideo --codec=h264 artifacts/video/readout-motion.mp4 &
+          xcrun simctl io "$udid" recordVideo --codec=h264 artifacts/video/readout-motion.mp4             >artifacts/video/recorder.log 2>&1 &
           recorder=$!
+          echo "recorder pid $recorder"
           sleep 16
-          kill -INT "$recorder" || true
-          wait "$recorder" || true
+          kill -INT "$recorder" 2>/dev/null || true
+          for _ in $(seq 1 15); do
+            kill -0 "$recorder" 2>/dev/null || break
+            sleep 1
+          done
+          kill -9 "$recorder" 2>/dev/null || true
+          wait "$recorder" 2>/dev/null || true
+          cat artifacts/video/recorder.log || true
 
           ls -l artifacts/video
           test -s artifacts/video/readout-motion.mp4
