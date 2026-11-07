@@ -186,15 +186,7 @@ jobs:
           xcrun simctl status_bar "$udid" override             --time "9:41" --batteryState charged --batteryLevel 100             --wifiBars 3 --cellularBars 4
           xcrun simctl install "$udid" build/Simulator/Speedometer.app
 
-          mkdir -p artifacts/video artifacts/frames
-
-          echo "--- simctl io support ---"
-          xcrun simctl help io 2>&1 | head -40 || true
-
-          # recordVideo renders the simulator display, which needs the
-          # Simulator UI in some runner images.
-          open -a Simulator --args -CurrentDeviceUDID "$udid" || true
-          sleep 5
+          mkdir -p artifacts/video
 
           # Demo playback at 1x: one fix per second, so both readouts change at
           # a readable, deterministic pace while the recording runs.
@@ -204,19 +196,9 @@ jobs:
           xcrun simctl io "$udid" recordVideo --codec=h264 artifacts/video/readout-motion.mp4             >artifacts/video/recorder.log 2>&1 &
           recorder=$!
           echo "recorder pid $recorder"
-
-          # Independent fallback: a screenshot burst, so the run still yields
-          # frame evidence where the recorder is unavailable.
-          shots=0
-          deadline=$((SECONDS + 45))
-          while [ $SECONDS -lt $deadline ]; do
-            shots=$((shots + 1))
-            xcrun simctl io "$udid" screenshot               "artifacts/frames/frame-$(printf %04d "$shots").png" >/dev/null 2>&1 || break
-          done
-          echo "burst frames: $shots"
-
+          sleep 14
           kill -INT "$recorder" 2>/dev/null || true
-          for _ in $(seq 1 15); do
+          for _ in $(seq 1 20); do
             kill -0 "$recorder" 2>/dev/null || break
             sleep 1
           done
@@ -225,28 +207,22 @@ jobs:
           echo "--- recorder log ---"
           cat artifacts/video/recorder.log || true
 
-          for f in artifacts/frames/*.png; do
-            [ -e "$f" ] || continue
-            sips -Z 420 -s format jpeg "$f" --out "${f%.png}.jpg" >/dev/null 2>&1 || true
-            rm -f "$f"
-          done
-
+          # The simulator records at full device resolution, which is far more
+          # than the artifact service accepts in one upload.
+          raw="artifacts/video/readout-motion.mp4"
+          test -s "$raw"
+          ls -l "$raw"
+          if command -v ffmpeg >/dev/null 2>&1; then
+            ffmpeg -y -loglevel error -i "$raw"               -vf scale=480:-2 -c:v libx264 -crf 30 -preset veryfast               artifacts/video/readout-motion-small.mp4
+            ls -l artifacts/video/readout-motion-small.mp4
+            mv artifacts/video/readout-motion-small.mp4 "$raw"
+          fi
           ls -l artifacts/video
-          du -sh artifacts/frames || true
-          test -s artifacts/video/readout-motion.mp4 || echo "video empty; burst frames only"
 
       - name: Upload video
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: velora-readout-video
           path: artifacts/video
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Upload frames
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: velora-readout-frames
-          path: artifacts/frames
           if-no-files-found: error
           retention-days: 14
